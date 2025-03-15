@@ -1,0 +1,11 @@
+streamlit>=1.25.0  # Ensure compatibility with latest features
+openai>=1.0.0
+playwright>=1.40.0
+beautifulsoup4>=4.12.0
+tiktoken>=0.5.0
+python-dotenv>=1.0.0
+google-genai>=1.0.0
+selenium>=4.15.2
+webdriver-manager>=3.4.0
+requests>=2.31.0  # Required for fetching the sitemap.xml
+lxml>=4.9.3  # Improves XML parsing for sitemaps
