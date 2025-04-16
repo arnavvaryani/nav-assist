@@ -5,7 +5,10 @@ import time
 
 # Import services
 from services.agent_service import run_agent_task
-from services.sitemap_service import generate_sitemap, generate_system_prompt
+# Remove import of generate_system_prompt from sitemap_service
+from services.sitemap_service import generate_sitemap
+# Import prompts.py functions
+from services.prompts import generate_system_prompt, generate_website_analyzed_message, generate_task_prompt
 from components.url_input import render_url_input
 from components.sitemap_display import display_sitemap
 from components.query_mapping_display import display_query_mapping
@@ -220,9 +223,15 @@ def _process_agent_input(user_input):
                 # Generate system prompt from site data
                 system_prompt = generate_system_prompt(st.session_state.site_data)
                 
-                # Run agent with system prompt and base URL
+                # Generate task-specific prompt based on user input
+                task_prompt = generate_task_prompt(user_input, st.session_state.site_data)
+                
+                # Combine prompts
+                combined_prompt = f"{system_prompt}\n\n{task_prompt}"
+                
+                # Run agent with combined prompt and base URL
                 result = run_agent_task(
-                    task=system_prompt,
+                    task=combined_prompt,
                     base_url=st.session_state.website_url,
                     api_key=st.session_state.api_key,
                     headless=headless,
