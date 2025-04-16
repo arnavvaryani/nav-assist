@@ -180,12 +180,22 @@ def display_sitemap(site_data: Dict[str, Any]):
         if site_data.get('forms'):
             st.subheader("Forms Detected")
             
-            for i, form in enumerate(site_data['forms']):
-                form_purpose = form.get('purpose', 'Unknown').capitalize()
-                form_method = form.get('method', 'GET')
-                form_action = form.get('action', '')
+            # Create a selectbox for forms instead of expanders
+            form_titles = [
+                f"{form.get('purpose', 'Unknown').capitalize()} Form ({form.get('method', 'GET')})"
+                for form in site_data['forms']
+            ]
+            
+            if form_titles:
+                selected_form = st.selectbox("Select a form to view details:", form_titles)
                 
-                with st.expander(f"{form_purpose} Form ({form_method})", expanded=i == 0):
+                if selected_form:
+                    # Get the index of the selected form
+                    selected_index = form_titles.index(selected_form)
+                    form = site_data['forms'][selected_index]
+                    
+                    # Display form details
+                    form_action = form.get('action', '')
                     st.write(f"**Action:** {form_action}")
                     
                     # Display form fields

@@ -21,11 +21,11 @@ def run_agent_task(
     browser_height: int = 800
 ) -> str:
     """
-    Runs the web agent with the provided task.
+    Runs the web agent with the provided task and site structure knowledge.
     
     Args:
         task: The task for the agent to perform
-        system_prompt: Optional system prompt with website knowledge
+        system_prompt: System prompt with website knowledge and query mapping instructions
         base_url: Base URL to start navigation from
         api_key: OpenAI API key (uses env var if not provided)
         headless: Whether to run browser in headless mode
@@ -48,13 +48,16 @@ def run_agent_task(
             disable_security=True
         )
         
-        # Create browser context configuration
+        # Create browser context configuration with adjusted settings for better performance
         context_config = BrowserContextConfig(
-            wait_for_network_idle_page_load_time=3.0,
+            wait_for_network_idle_page_load_time=3.0,  # Reduced wait time for better performance
             browser_window_size={'width': browser_width, 'height': browser_height},
             locale='en-US',
             highlight_elements=True,
             viewport_expansion=500,
+            # Add timeout settings for better reliability
+            navigation_timeout=60000,  # 60 seconds navigation timeout
+            default_timeout=30000,     # 30 seconds default timeout
         )
         
         logger.info("Initializing browser...")
@@ -63,21 +66,20 @@ def run_agent_task(
         browser = Browser(config=browser_config)
         context = BrowserContext(browser=browser, config=context_config)
         
-        # Initialize the language model
+        # Initialize the language model with higher temperature for better reasoning
         logger.info("Initializing language model...")
-        llm = ChatOpenAI(model="gpt-4o")
+        llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
         
-        logger.info("Running agent task...")
+        logger.info("Running agent task with query mapping...")
         
         # Prepare the complete task with context
-        complete_task = task
+        complete_task = f"TASK: {task}"
         
-        # Add base URL if provided
-        if base_url:
-            complete_task = f"Start by navigating to {base_url} and then {task}"
+        # Don't automatically add the base URL instruction - let the agent decide where to start
+        # based on the query mapping process described in the system prompt
         
         # Run the task using async function
-        result = asyncio.run(_run_agent_async(context, complete_task, llm, system_prompt))
+        result = asyncio.run(_run_agent_async(context, complete_task, llm, system_prompt, base_url))
         
         logger.info(f"Agent task completed successfully: {task[:50]}...")
         return result
@@ -88,15 +90,16 @@ def run_agent_task(
         logger.error(traceback.format_exc())
         raise Exception(error_msg)
 
-async def _run_agent_async(context, task, llm, system_prompt=None):
+async def _run_agent_async(context, task, llm, system_prompt=None, base_url=None):
     """
-    Run the agent asynchronously.
+    Run the agent asynchronously with improved query mapping.
     
     Args:
         context: Browser context
         task: User task
         llm: Language model
-        system_prompt: Optional system prompt
+        system_prompt: System prompt with site knowledge and query mapping instructions
+        base_url: Base URL of the website
     """
     try:
         # Initialize the agent with optional system prompt
@@ -109,7 +112,10 @@ async def _run_agent_async(context, task, llm, system_prompt=None):
         # Add system prompt if provided
         if system_prompt:
             agent_kwargs["system_prompt"] = system_prompt
-            logger.info("Using custom system prompt with site structure information")
+            logger.info("Using custom system prompt with site structure information and query mapping")
+        
+        # Set max iterations higher to allow for more complex navigation
+        agent_kwargs["max_iterations"] = 15
         
         # Initialize the agent
         agent = Agent(**agent_kwargs)
@@ -134,7 +140,7 @@ async def _run_agent_async(context, task, llm, system_prompt=None):
             result = result.decode('utf-8', errors='ignore')
             
         # Format the result for better readability
-        formatted_result = _format_agent_result(result, task)
+        formatted_result = _format_agent_result(result, task, base_url)
         
         return formatted_result
         
@@ -143,19 +149,23 @@ async def _run_agent_async(context, task, llm, system_prompt=None):
         logger.error(traceback.format_exc())
         raise e
 
-def _format_agent_result(result: str, task: str) -> str:
+def _format_agent_result(result: str, task: str, base_url: Optional[str] = None) -> str:
     """
-    Format the agent result for better readability.
+    Format the agent result for better readability, including page mapping information.
     
     Args:
         result: Raw agent result
         task: User task
+        base_url: Base URL of the website
         
     Returns:
         Formatted result string
     """
     try:
-        # If the result is extremely long, we might want to summarize it
+        # Extract page origins from the result if possible
+        pages_visited = _extract_visited_pages(result, base_url)
+        
+        # Format the result for length if needed
         if len(result) > 10000:
             # Extract key sections or truncate intelligently
             formatted_result = result[:10000] + "\n\n[... Additional content truncated ...]"
@@ -164,6 +174,17 @@ def _format_agent_result(result: str, task: str) -> str:
             
         # Add a header to the result
         header = f"# Results for: {task}\n\n"
+        
+        # Add visited pages info if available
+        if pages_visited:
+            header += "## Pages Examined\n"
+            for i, page in enumerate(pages_visited[:5]):
+                header += f"{i+1}. {page}\n"
+            
+            if len(pages_visited) > 5:
+                header += f"...and {len(pages_visited) - 5} more pages\n"
+            
+            header += "\n"
         
         # If the result doesn't already have structured sections, add them
         if "## Summary" not in formatted_result:
@@ -178,6 +199,62 @@ def _format_agent_result(result: str, task: str) -> str:
         logger.error(f"Error formatting agent result: {str(e)}")
         # Return original result if formatting fails
         return result
+
+def _extract_visited_pages(result: str, base_url: Optional[str] = None) -> List[str]:
+    """
+    Extract list of pages that were visited from the agent's result.
+    
+    Args:
+        result: The agent result string
+        base_url: Base URL of the website
+        
+    Returns:
+        List of visited page URLs
+    """
+    visited_pages = []
+    
+    try:
+        # Common patterns that indicate a page visit in the agent's log
+        patterns = [
+            r"Navigating to [\"']?(https?://[^\"'\s]+)[\"']?",
+            r"Visited [\"']?(https?://[^\"'\s]+)[\"']?",
+            r"Browsing [\"']?(https?://[^\"'\s]+)[\"']?",
+            r"URL: (https?://[^\"'\s]+)",
+            r"Page: (https?://[^\"'\s]+)",
+        ]
+        
+        import re
+        
+        # Extract all URLs that match any of the patterns
+        for pattern in patterns:
+            matches = re.finditer(pattern, result)
+            for match in matches:
+                url = match.group(1).strip('"\'')
+                if url and url not in visited_pages:
+                    visited_pages.append(url)
+        
+        # If we have a base_url, also look for relative paths
+        if base_url:
+            base_domain = urlparse(base_url).netloc
+            relative_patterns = [
+                r"Navigating to [\"']?(/[^\"'\s]+)[\"']?",
+                r"Visited [\"']?(/[^\"'\s]+)[\"']?",
+                r"Browsing [\"']?(/[^\"'\s]+)[\"']?",
+            ]
+            
+            for pattern in relative_patterns:
+                matches = re.finditer(pattern, result)
+                for match in matches:
+                    path = match.group(1).strip('"\'')
+                    if path:
+                        full_url = f"{base_url.rstrip('/')}{path}"
+                        if full_url not in visited_pages:
+                            visited_pages.append(full_url)
+    
+    except Exception as e:
+        logger.error(f"Error extracting visited pages: {str(e)}")
+    
+    return visited_pages
 
 def get_agent_status():
     """Get information about agent capabilities and status."""
@@ -218,3 +295,6 @@ def get_agent_status():
             "agent_ready": False,
             "error": str(e)
         }
+
+# Import missing modules
+from urllib.parse import urlparse

@@ -8,6 +8,7 @@ from services.agent_service import run_agent_task
 from services.sitemap_service import generate_sitemap, generate_system_prompt
 from components.url_input import render_url_input
 from components.sitemap_display import display_sitemap
+from components.query_mapping_display import display_query_mapping
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -175,6 +176,10 @@ def render_chat_interface():
                     # Display user message
                     with st.chat_message("user"):
                         st.markdown(user_input)
+                    
+                    # Show query mapping analysis before processing
+                    with st.expander("Query Mapping Analysis", expanded=False):
+                        display_query_mapping(user_input, st.session_state.site_data)
                     
                     # Process the input with agent
                     with st.spinner("Working on your request... This may take a moment."):
