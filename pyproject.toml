@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "nav-assist-agent"
+version = "0.1.0"
+description = ""
+authors = ["Arnav Varyani <arnavvaryani@gmail.com>"]
+readme = "README.md"
+packages = [
+    {include = "main"},
+]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+langchain-openai = "0.3.1"
+browser-use = "^0.1.40"
+nest-asyncio = "^1.6.0"
+streamlit = "^1.44.1"
+playwright = "^1.51.0"
+langchain = "^0.3.23"
+python-dotenv = "^1.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
