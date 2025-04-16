@@ -246,46 +246,72 @@ def _process_agent_input(user_input):
                     logger.warning(f"Agent returned non-string result of type: {type(result)}")
                     result = str(result)
                 
+                # Check if the result contains a security alert
+                is_security_alert = "⚠️ **SECURITY ALERT**" in result or "SECURITY ALERT" in result
+                
                 # Store result in session state
                 st.session_state.agent_result = result
                 
-                # Generate response message
-                response = f"✅ I've found information about \"{user_input}\" on {st.session_state.website_url}\n\n"
-                
-                # Safely extract a preview of the result
-                try:
-                    # Extract first 500 characters for the chat
-                    if len(result) > 500:
-                        result_preview = result[:500] + "..."
-                    else:
-                        result_preview = result
-                    
-                    response += f"**Summary of findings:**\n\n{result_preview}\n\n"
-                    
-                    if len(result) > 500:
-                        response += "_Full results are available in the expandable section above._"
-                except Exception as preview_error:
-                    logger.error(f"Error creating result preview: {str(preview_error)}")
-                    response += "**Findings:** I completed the search successfully. View the full results in the expandable section above."
-                
                 # Remove thinking message and show final response
                 thinking_placeholder.empty()
-                st.markdown(response)
                 
-                # Add assistant message to chat history
-                st.session_state.messages.append({"role": "assistant", "content": response})
+                if is_security_alert:
+                    # Display security alert
+                    st.error(result)
+                    
+                    # Add assistant message to chat history with security alert
+                    response = f"⚠️ **Security Alert**: I've detected a potential security issue with your query. For your protection, I've stopped processing this request.\n\nPlease modify your query to focus on legitimate website information."
+                    st.markdown(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
+                else:
+                    # Generate response message for normal results
+                    response = f"✅ I've found information about \"{user_input}\" on {st.session_state.website_url}\n\n"
+                    
+                    # Safely extract a preview of the result
+                    try:
+                        # Extract first 500 characters for the chat
+                        if len(result) > 500:
+                            result_preview = result[:500] + "..."
+                        else:
+                            result_preview = result
+                        
+                        response += f"**Summary of findings:**\n\n{result_preview}\n\n"
+                        
+                        if len(result) > 500:
+                            response += "_Full results are available in the expandable section above._"
+                    except Exception as preview_error:
+                        logger.error(f"Error creating result preview: {str(preview_error)}")
+                        response += "**Findings:** I completed the search successfully. View the full results in the expandable section above."
+                    
+                    st.markdown(response)
+                    
+                    # Add assistant message to chat history
+                    st.session_state.messages.append({"role": "assistant", "content": response})
                 
             except Exception as agent_error:
                 logger.error(f"Error running agent task: {str(agent_error)}")
                 logger.error(traceback.format_exc())
                 
-                # Remove thinking message and show error
-                thinking_placeholder.empty()
-                error_message = f"❌ I encountered an error while searching for \"{user_input}\" on {st.session_state.website_url}\n\n"
-                error_message += f"Error: {str(agent_error)}\n\n"
-                error_message += "Please try a different query or check if your API key has the correct permissions."
+                # Check if this is a security breach exception
+                is_security_breach = "SecurityBreachException" in str(agent_error) or "security breach" in str(agent_error).lower()
                 
-                st.markdown(error_message)
+                # Remove thinking message and show appropriate error
+                thinking_placeholder.empty()
+                
+                if is_security_breach:
+                    # Display security breach alert
+                    error_message = f"⚠️ **Security Alert**: A potential security issue was detected in your query: \"{user_input}\"\n\n"
+                    error_message += "For your protection, I've stopped processing this request.\n\n"
+                    error_message += "Please modify your query to focus on legitimate website information."
+                    
+                    st.error(error_message)
+                else:
+                    # Display regular error message
+                    error_message = f"❌ I encountered an error while searching for \"{user_input}\" on {st.session_state.website_url}\n\n"
+                    error_message += f"Error: {str(agent_error)}\n\n"
+                    error_message += "Please try a different query or check if your API key has the correct permissions."
+                    
+                    st.markdown(error_message)
                 
                 # Add error message to chat history
                 st.session_state.messages.append({"role": "assistant", "content": error_message})
