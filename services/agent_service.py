@@ -54,10 +54,7 @@ def run_agent_task(
             browser_window_size={'width': browser_width, 'height': browser_height},
             locale='en-US',
             highlight_elements=True,
-            viewport_expansion=500,
-            # Add timeout settings for better reliability
-            navigation_timeout=60000,  # 60 seconds navigation timeout
-            default_timeout=30000,     # 30 seconds default timeout
+            viewport_expansion=500,   
         )
         
         logger.info("Initializing browser...")
@@ -115,7 +112,7 @@ async def _run_agent_async(context, task, llm, system_prompt=None, base_url=None
             logger.info("Using custom system prompt with site structure information and query mapping")
         
         # Set max iterations higher to allow for more complex navigation
-        agent_kwargs["max_iterations"] = 15
+       # agent_kwargs["max_iterations"] = 15
         
         # Initialize the agent
         agent = Agent(**agent_kwargs)

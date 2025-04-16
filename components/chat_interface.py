@@ -222,8 +222,7 @@ def _process_agent_input(user_input):
                 
                 # Run agent with system prompt and base URL
                 result = run_agent_task(
-                    task=user_input,
-                    system_prompt=system_prompt,
+                    task=system_prompt,
                     base_url=st.session_state.website_url,
                     api_key=st.session_state.api_key,
                     headless=headless,
