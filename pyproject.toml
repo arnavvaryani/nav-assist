@@ -5,7 +5,8 @@ description = ""
 authors = ["Arnav Varyani <arnavvaryani@gmail.com>"]
 readme = "README.md"
 packages = [
-    {include = "main"},
+    {include = "components"},
+    {include = "services"},
 ]
 
 [tool.poetry.dependencies]
@@ -17,6 +18,8 @@ streamlit = "^1.44.1"
 playwright = "^1.51.0"
 langchain = "^0.3.23"
 python-dotenv = "^1.1.0"
+matplotlib = "^3.10.1"
+
 
 
 [build-system]

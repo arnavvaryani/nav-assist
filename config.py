@@ -13,14 +13,14 @@ def set_page_config():
     """Set the page configuration for the app with error handling."""
     try:
         st.set_page_config(
-            page_title="AI Web Assistant",
-            page_icon="🤖",
+            page_title="Website Analyzer",
+            page_icon="🔍",
             layout="wide",
             initial_sidebar_state="expanded",
             menu_items={
-                'Get Help': 'https://github.com/yourusername/aiwebassistant',
-                'Report a bug': 'https://github.com/yourusername/aiwebassistant/issues',
-                'About': 'AI Web Assistant - Automated web tasks powered by AI.'
+                'Get Help': 'https://github.com/yourusername/websiteanalyzer',
+                'Report a bug': 'https://github.com/yourusername/websiteanalyzer/issues',
+                'About': 'Website Analyzer - Automated website analysis powered by AI.'
             }
         )
         
@@ -74,9 +74,19 @@ def initialize_session_state():
     try:
         logger.info("Initializing session state")
         
+        # Website analysis related state
+        if 'website_analyzed' not in st.session_state:
+            st.session_state.website_analyzed = False
+            
+        if 'website_url' not in st.session_state:
+            st.session_state.website_url = None
+            
+        if 'site_data' not in st.session_state:
+            st.session_state.site_data = None
+        
         # Agent related state
         if 'agent_mode' not in st.session_state:
-            st.session_state.agent_mode = True  # Default to agent mode since we're removing navigation
+            st.session_state.agent_mode = True
             
         if 'agent_result' not in st.session_state:
             st.session_state.agent_result = None
@@ -101,7 +111,7 @@ def initialize_session_state():
         # Chat interface related state
         if 'messages' not in st.session_state:
             st.session_state.messages = [
-                {"role": "assistant", "content": "Hello! I'm your AI Web Assistant. I can help you automate web tasks. Just tell me what you're looking for, and I'll navigate the web for you. What would you like to do today?"}
+                {"role": "assistant", "content": "Hello! I'm your Website Analyzer. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
             ]
         
         # Conversation history storage
@@ -113,7 +123,7 @@ def initialize_session_state():
             # Initialize default conversation
             if "default" not in st.session_state.conversations:
                 st.session_state.conversations["default"] = {
-                    "title": "New chat",
+                    "title": "New analysis",
                     "messages": st.session_state.messages.copy(),
                     "timestamp": ""
                 }

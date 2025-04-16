@@ -11,13 +11,22 @@ from browser_use.browser.context import BrowserContextConfig, BrowserContext
 # Set up logging
 logger = logging.getLogger("agent_service")
 
-def run_agent_task(task: str, api_key: Optional[str] = None, headless: bool = True, 
-                  browser_width: int = 1280, browser_height: int = 800) -> str:
+def run_agent_task(
+    task: str, 
+    system_prompt: Optional[str] = None,
+    base_url: Optional[str] = None,
+    api_key: Optional[str] = None, 
+    headless: bool = True, 
+    browser_width: int = 1280, 
+    browser_height: int = 800
+) -> str:
     """
     Runs the web agent with the provided task.
     
     Args:
         task: The task for the agent to perform
+        system_prompt: Optional system prompt with website knowledge
+        base_url: Base URL to start navigation from
         api_key: OpenAI API key (uses env var if not provided)
         headless: Whether to run browser in headless mode
         browser_width: Browser window width
@@ -60,8 +69,15 @@ def run_agent_task(task: str, api_key: Optional[str] = None, headless: bool = Tr
         
         logger.info("Running agent task...")
         
+        # Prepare the complete task with context
+        complete_task = task
+        
+        # Add base URL if provided
+        if base_url:
+            complete_task = f"Start by navigating to {base_url} and then {task}"
+        
         # Run the task using async function
-        result = asyncio.run(_run_agent_async(context, task, llm))
+        result = asyncio.run(_run_agent_async(context, complete_task, llm, system_prompt))
         
         logger.info(f"Agent task completed successfully: {task[:50]}...")
         return result
@@ -72,18 +88,46 @@ def run_agent_task(task: str, api_key: Optional[str] = None, headless: bool = Tr
         logger.error(traceback.format_exc())
         raise Exception(error_msg)
 
-async def _run_agent_async(context, task, llm):
-    """Run the agent asynchronously."""
+async def _run_agent_async(context, task, llm, system_prompt=None):
+    """
+    Run the agent asynchronously.
+    
+    Args:
+        context: Browser context
+        task: User task
+        llm: Language model
+        system_prompt: Optional system prompt
+    """
     try:
+        # Initialize the agent with optional system prompt
+        agent_kwargs = {
+            "browser_context": context,
+            "task": task,
+            "llm": llm,
+        }
+        
+        # Add system prompt if provided
+        if system_prompt:
+            agent_kwargs["system_prompt"] = system_prompt
+            logger.info("Using custom system prompt with site structure information")
+        
         # Initialize the agent
-        agent = Agent(
-            browser_context=context,
-            task=task,
-            llm=llm,
-        )
+        agent = Agent(**agent_kwargs)
         
         # Run the agent
-        result = await agent.run()
+        agent_history = await agent.run()
+        
+        # Convert the agent history to a string representation
+        # The agent might return AgentHistoryList object instead of a string
+        if hasattr(agent_history, 'to_string'):
+            # Use the to_string method if available
+            result = agent_history.to_string()
+        elif hasattr(agent_history, '__str__'):
+            # Fall back to the string representation
+            result = str(agent_history)
+        else:
+            # Handle unexpected return type
+            result = f"Completed task: {task}\n\nAgent returned results in an unsupported format."
         
         # If result is a byte string, decode it
         if isinstance(result, bytes):
@@ -100,14 +144,40 @@ async def _run_agent_async(context, task, llm):
         raise e
 
 def _format_agent_result(result: str, task: str) -> str:
-    """Format the agent result for better readability.
-    
-    This function can be expanded to parse and format the results
-    in a more structured way depending on the task type.
     """
-    # For now, just return the result directly
-    # This can be expanded to provide better formatting later
-    return result
+    Format the agent result for better readability.
+    
+    Args:
+        result: Raw agent result
+        task: User task
+        
+    Returns:
+        Formatted result string
+    """
+    try:
+        # If the result is extremely long, we might want to summarize it
+        if len(result) > 10000:
+            # Extract key sections or truncate intelligently
+            formatted_result = result[:10000] + "\n\n[... Additional content truncated ...]"
+        else:
+            formatted_result = result
+            
+        # Add a header to the result
+        header = f"# Results for: {task}\n\n"
+        
+        # If the result doesn't already have structured sections, add them
+        if "## Summary" not in formatted_result:
+            # Add some basic structure
+            formatted_result = header + formatted_result
+        else:
+            formatted_result = header + formatted_result
+            
+        return formatted_result
+    
+    except Exception as e:
+        logger.error(f"Error formatting agent result: {str(e)}")
+        # Return original result if formatting fails
+        return result
 
 def get_agent_status():
     """Get information about agent capabilities and status."""

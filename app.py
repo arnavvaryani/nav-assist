@@ -43,8 +43,46 @@ def main():
                 padding: 10px;
                 margin: 10px 0;
             }
+            /* Fix for expandable sections */
+            .streamlit-expanderContent {
+                background-color: rgba(247, 247, 247, 0.05);
+                border-radius: 4px;
+                padding: 10px;
+            }
+            /* Fix for overflow in long text */
+            pre {
+                white-space: pre-wrap;
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+            }
+            /* Sitemap display styling */
+            .sitemap-node {
+                border-left: 2px solid #4CAF50;
+                padding-left: 10px;
+                margin-bottom: 5px;
+            }
+            .sitemap-depth-1 { margin-left: 10px; }
+            .sitemap-depth-2 { margin-left: 30px; }
+            .sitemap-depth-3 { margin-left: 50px; }
+            .sitemap-depth-4 { margin-left: 70px; }
+            .sitemap-depth-5 { margin-left: 90px; }
+            /* Website analysis form styling */
+            .url-input-container {
+                background-color: rgba(100, 149, 237, 0.05);
+                border-radius: 10px;
+                padding: 20px;
+                margin-bottom: 20px;
+            }
         </style>
         """, unsafe_allow_html=True)
+
+        # Check for browser-use dependency
+        try:
+            import browser_use
+        except ImportError:
+            st.error("The `browser-use` package is not installed. Please install it using: `pip install browser-use`")
+            st.warning("This application requires the browser-use package to function properly.")
+            st.stop()
 
         # Render sidebar
         render_sidebar()
