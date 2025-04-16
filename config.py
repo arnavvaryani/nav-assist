@@ -14,14 +14,14 @@ def set_page_config():
     """Set the page configuration for the app with error handling."""
     try:
         st.set_page_config(
-            page_title="Website Analyzer",
+            page_title="Nav Assist",
             page_icon="🔍",
             layout="wide",
             initial_sidebar_state="expanded",
             menu_items={
                 'Get Help': 'https://github.com/yourusername/websiteanalyzer',
                 'Report a bug': 'https://github.com/yourusername/websiteanalyzer/issues',
-                'About': 'Website Analyzer - Automated website analysis powered by AI.'
+                'About': 'Nav Assist - Automated website analysis powered by AI.'
             }
         )
         
@@ -43,6 +43,24 @@ def validate_api_key(api_key):
     if not api_key.startswith('sk-'):
         return False, "API key should start with 'sk-'"
     
+    if len(api_key) < 30:
+        return False, "API key appears too short"
+    
+    # Check for invalid characters
+    if re.search(r'[^a-zA-Z0-9_\-]', api_key):
+        return False, "API key contains invalid characters"
+        
+    return True, "Valid API key format"
+
+def validate_langsmith_key(api_key):
+    """Validate LangSmith API key format."""
+    if not api_key:
+        return False, "API key is empty"
+    
+    # Remove any whitespace
+    api_key = api_key.strip()
+    
+    # Basic validation for LangSmith keys
     if len(api_key) < 30:
         return False, "API key appears too short"
     
@@ -100,6 +118,48 @@ def load_api_key():
     
     return api_key
 
+def load_langsmith_key():
+    """Load LangSmith API key from .env file or Streamlit secrets."""
+    langsmith_api_key = None
+    
+    try:
+        # Try loading from .env file
+        logger.info("Attempting to load LangSmith API key from .env file")
+        load_dotenv()
+        env_api_key = os.getenv("LANGSMITH_API_KEY")
+        
+        if env_api_key:
+            # Validate the key
+            is_valid, message = validate_langsmith_key(env_api_key)
+            if is_valid:
+                logger.info(f"LangSmith API key loaded from .env file: {message}")
+                langsmith_api_key = env_api_key.strip()  # Remove any whitespace
+            else:
+                logger.warning(f"LangSmith API key from .env file appears invalid: {message}")
+        else:
+            logger.info("No LangSmith API key found in .env file, trying Streamlit secrets")
+            
+            # Try loading from Streamlit secrets
+            try:
+                secret_api_key = st.secrets.get("LANGSMITH_API_KEY")
+                if secret_api_key:
+                    # Validate the key
+                    is_valid, message = validate_langsmith_key(secret_api_key)
+                    if is_valid:
+                        logger.info(f"LangSmith API key loaded from Streamlit secrets: {message}")
+                        langsmith_api_key = secret_api_key.strip()  # Remove any whitespace
+                    else:
+                        logger.warning(f"LangSmith API key from Streamlit secrets appears invalid: {message}")
+                else:
+                    logger.warning("No LangSmith API key found in Streamlit secrets")
+            except Exception as secret_error:
+                logger.warning(f"Failed to load LangSmith API key from Streamlit secrets: {str(secret_error)}")
+    
+    except Exception as e:
+        logger.error(f"Error loading LangSmith API key: {str(e)}")
+    
+    return langsmith_api_key
+
 def initialize_session_state():
     """Initialize session state variables with error handling."""
     try:
@@ -128,6 +188,16 @@ def initialize_session_state():
             
         if 'api_key_set' not in st.session_state:
             st.session_state.api_key_set = False
+            
+        # LangSmith API key state
+        if 'langsmith_api_key' not in st.session_state:
+            st.session_state.langsmith_api_key = None
+            
+        if 'langsmith_enabled' not in st.session_state:
+            st.session_state.langsmith_enabled = False
+            
+        if 'langsmith_project' not in st.session_state:
+            st.session_state.langsmith_project = "nav-assist"
         
         # Browser settings
         if 'headless' not in st.session_state:
@@ -142,7 +212,7 @@ def initialize_session_state():
         # Chat interface related state
         if 'messages' not in st.session_state:
             st.session_state.messages = [
-                {"role": "assistant", "content": "Hello! I'm your Website Analyzer. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
+                {"role": "assistant", "content": "Hello! I'm your Nav Assist. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
             ]
         
         # Conversation history storage
@@ -169,6 +239,18 @@ def initialize_session_state():
             logger.debug("API key set in environment variable from session state")
         else:
             st.session_state.api_key_set = False
+        
+        # Load and set LangSmith API key if available
+        langsmith_api_key = load_langsmith_key()
+        if langsmith_api_key:
+            st.session_state.langsmith_api_key = langsmith_api_key
+            st.session_state.langsmith_enabled = True
+            # Set it in the environment for LangSmith to use
+            os.environ["LANGSMITH_API_KEY"] = langsmith_api_key
+            os.environ["LANGSMITH_PROJECT"] = st.session_state.langsmith_project
+            logger.debug("LangSmith API key set in environment variable from session state")
+        else:
+            st.session_state.langsmith_enabled = False
             
         logger.info("Session state initialized successfully")
             

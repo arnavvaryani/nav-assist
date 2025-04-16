@@ -175,7 +175,7 @@ def generate_conversation_intro() -> str:
     Returns:
         A string with the welcome message
     """
-    return "Hello! I'm your Website Analyzer. I can help you analyze any website and find information for you. Please enter a website URL to get started."
+    return "Hello! I'm your Nav Assist. I can help you analyze any website and find information for you. Please enter a website URL to get started."
 
 def generate_website_analyzed_message(site_data: Dict[str, Any]) -> str:
     """

@@ -1141,6 +1141,9 @@ def generate_sitemap(url: str, max_depth: int = 3) -> Dict[str, Any]:
         requests_per_minute = st.session_state.get('requests_per_minute', 30)
         max_pages = st.session_state.get('max_pages', 50)
         
+        # Record start time for performance tracking
+        start_time = time.time()
+        
         # Create extractor instance
         extractor = WebsiteSitemapExtractor(
             requests_per_minute=requests_per_minute,
@@ -1150,6 +1153,9 @@ def generate_sitemap(url: str, max_depth: int = 3) -> Dict[str, Any]:
         
         # Extract initial sitemap
         site_data = extractor.extract_sitemap(url, background_mapping=True)
+        
+        # Calculate execution time
+        execution_time = time.time() - start_time
         
         # Transform the data to match the expected format by the UI
         domain = urlparse(url).netloc
@@ -1222,6 +1228,52 @@ def generate_sitemap(url: str, max_depth: int = 3) -> Dict[str, Any]:
         if site_data.get("social_links"):
             result["social_links"] = site_data.get("social_links")
         
+        # Track sitemap generation with LangSmith if enabled
+        try:
+            from langsmith_config import track_prompt
+            
+            # Check if LangSmith tracking is enabled
+            if st.session_state.get('langsmith_enabled', False):
+                # Prepare inputs for tracking
+                inputs = {
+                    "url": url,
+                    "max_depth": max_depth,
+                    "max_pages": max_pages,
+                    "requests_per_minute": requests_per_minute
+                }
+                
+                # Prepare a simplified version of the result for tracking
+                result_summary = {
+                    "url": result.get("url", ""),
+                    "title": result.get("title", ""),
+                    "internal_link_count": result.get("internal_link_count", 0),
+                    "external_link_count": result.get("external_link_count", 0),
+                    "nav_links_count": len(result.get("navigation_links", [])),
+                    "content_sections_count": len(result.get("content_sections", [])),
+                    "forms_count": len(result.get("forms", [])) if "forms" in result else 0,
+                    "social_links_count": len(result.get("social_links", [])) if "social_links" in result else 0
+                }
+                
+                # Add metadata for filtering/analysis
+                metadata = {
+                    "component": "sitemap_extractor",
+                    "url_domain": urlparse(url).netloc,
+                    "max_depth": max_depth,
+                    "execution_time": execution_time
+                }
+                
+                # Track the run in LangSmith
+                run_id = track_prompt(
+                    name="Website Sitemap Generation",
+                    prompts=inputs,
+                    completion=str(result_summary),
+                    metadata=metadata
+                )
+                
+                logger.info(f"Sitemap generation tracked in LangSmith for {url}")
+        except Exception as tracking_error:
+            logger.error(f"Error tracking sitemap generation in LangSmith: {str(tracking_error)}")
+        
         logger.info(f"Site structure analysis completed for URL: {url}")
         return result
         
@@ -1240,4 +1292,3 @@ def generate_sitemap(url: str, max_depth: int = 3) -> Dict[str, Any]:
             "internal_link_count": 0,
             "external_link_count": 0,
         }
-

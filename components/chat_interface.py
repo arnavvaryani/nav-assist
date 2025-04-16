@@ -25,7 +25,7 @@ def render_chat_interface():
         if not st.session_state.api_key_set:
             st.warning("⚠️ OpenAI API key not set. Please add your API key in the sidebar.")
         
-        st.subheader("🤖 AI Web Assistant")
+        st.subheader("Nav Assist")
         
         # Initialize website analysis state if not present
         if 'website_analyzed' not in st.session_state:
@@ -157,7 +157,7 @@ def render_chat_interface():
                 logger.error(f"Error displaying messages: {str(message_error)}")
                 st.error(f"Error displaying chat history: {str(message_error)}")
                 st.session_state.messages = [
-                    {"role": "assistant", "content": "Hello! I'm your AI Web Assistant. How can I help you today?"}
+                    {"role": "assistant", "content": "Hello! I'm NavAssist. How can I help you today?"}
                 ]
         
         # Chat Input (only if website is analyzed)

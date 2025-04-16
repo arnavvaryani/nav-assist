@@ -145,6 +145,9 @@ def _find_relevant_pages_with_ai(user_query: str, site_data: Dict[str, Any]) -> 
     if not api_key:
         raise ValueError("OpenAI API key not found")
     
+    # Record start time for tracking
+    start_time = time.time()
+    
     # Prepare the navigation links data
     navigation_data = []
     base_domain = urlparse(site_data.get('url', '')).netloc
@@ -288,6 +291,53 @@ Return exactly 5 pages (or fewer if there aren't enough matches), ordered by rel
                 "section": page.get('section', 'Website'),
                 "reasoning": page.get('reasoning', '')
             })
+        
+        # Calculate execution time
+        execution_time = time.time() - start_time
+        
+        # Track AI-based page matching with LangSmith if enabled
+        try:
+            from langsmith_config import track_prompt
+            
+            # Check if LangSmith tracking is enabled
+            langsmith_enabled = st.session_state.get('langsmith_enabled', False)
+            if langsmith_enabled:
+                # Prepare inputs for tracking
+                inputs = {
+                    "user_query": user_query,
+                    "website_structure": navigation_data,
+                    "system_prompt": system_prompt,
+                    "query_prompt": query_prompt
+                }
+                
+                # Prepare tracking output
+                output = {
+                    "relevant_pages": relevant_pages,
+                    "total_matches": len(relevant_pages),
+                    "top_score": relevant_pages[0]['score'] if relevant_pages else 0
+                }
+                
+                # Add metadata for filtering/analysis
+                metadata = {
+                    "component": "query_mapping",
+                    "domain": urlparse(site_data.get('url', '')).netloc,
+                    "query_length": len(user_query),
+                    "nav_items_count": len(navigation_data),
+                    "model": "gpt-3.5-turbo",
+                    "execution_time": execution_time
+                }
+                
+                # Track the run in LangSmith
+                run_id = track_prompt(
+                    name="Query Mapping Analysis",
+                    prompts=inputs,
+                    completion=str(output),
+                    metadata=metadata
+                )
+                
+                logger.info(f"Query mapping tracked in LangSmith with run ID: {run_id}")
+        except Exception as tracking_error:
+            logger.error(f"Error tracking query mapping in LangSmith: {str(tracking_error)}")
         
         return relevant_pages
         

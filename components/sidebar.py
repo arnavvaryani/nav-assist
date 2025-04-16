@@ -4,6 +4,7 @@ import datetime
 import logging
 import os
 import re
+from langsmith_config import get_project_metrics
 
 logger = logging.getLogger("sidebar")
 
@@ -28,13 +29,31 @@ def is_valid_openai_key(api_key):
         
     return True, "Valid API key format"
 
+def is_valid_langsmith_key(api_key):
+    """Validate if the LangSmith API key has the correct format."""
+    if not api_key:
+        return False, "API key is empty"
+    
+    # Remove any whitespace
+    api_key = api_key.strip()
+    
+    # Basic validation for LangSmith keys
+    if len(api_key) < 20:  # LangSmith keys are generally long
+        return False, "API key is too short"
+    
+    # Check for invalid characters
+    if re.search(r'[^a-zA-Z0-9_\-]', api_key):
+        return False, "API key contains invalid characters"
+        
+    return True, "Valid API key format"
+
 def render_sidebar():
     """Render the sidebar with website analysis settings."""
     with st.sidebar:
-        st.title("Website Analyzer")
+        st.title("Nav Assist")
         
         # Create tabs for different sidebar sections
-        main_tab, settings_tab = st.tabs(["Main", "Settings"])
+        main_tab, settings_tab, metrics_tab = st.tabs(["Main", "Settings", "Metrics"])
         
         with main_tab:
             # API Key status section with enhanced validation
@@ -87,6 +106,53 @@ def render_sidebar():
                 
                 # Add a note about how to get an API key
                 st.info("You need an OpenAI API key to use this app. Get one at: https://platform.openai.com/api-keys")
+            
+            # LangSmith API Key Section
+            st.subheader("LangSmith Metrics")
+            
+            # Check if LangSmith key is set
+            langsmith_enabled = st.session_state.get('langsmith_enabled', False)
+            if langsmith_enabled:
+                st.success("LangSmith tracking enabled")
+            else:
+                st.warning("LangSmith tracking disabled")
+                
+                # LangSmith API key input
+                with st.form("langsmith_key_form"):
+                    langsmith_key = st.text_input("Enter LangSmith API Key", type="password", 
+                                            help="Enable tracking of prompt metrics")
+                    project_name = st.text_input("Project Name", 
+                                            value=st.session_state.get('langsmith_project', 'nav-assist'),
+                                            help="LangSmith project name for grouping metrics")
+                    submit_langsmith = st.form_submit_button("Enable LangSmith")
+                    
+                    if submit_langsmith:
+                        if langsmith_key:
+                            # Validate the key format
+                            is_valid, message = is_valid_langsmith_key(langsmith_key)
+                            
+                            if is_valid:
+                                # Clean the key (remove whitespace)
+                                clean_key = langsmith_key.strip()
+                                
+                                # Update session state
+                                st.session_state.langsmith_api_key = clean_key
+                                st.session_state.langsmith_enabled = True
+                                st.session_state.langsmith_project = project_name
+                                
+                                # Set environment variables
+                                os.environ["LANGSMITH_API_KEY"] = clean_key
+                                os.environ["LANGSMITH_PROJECT"] = project_name
+                                
+                                st.success("LangSmith tracking enabled!")
+                                st.rerun()
+                            else:
+                                st.error(f"Invalid LangSmith API key: {message}")
+                        else:
+                            st.error("Please enter a LangSmith API key")
+                
+                # Add a note about LangSmith
+                st.info("LangSmith helps track and optimize AI prompts. Get an API key at: https://smith.langchain.com/")
             
             # Only show task suggestions if a website is being analyzed
             if st.session_state.get('website_analyzed', False) and st.session_state.get('site_data'):
@@ -174,7 +240,7 @@ def render_sidebar():
                 st.session_state.conversations[new_id] = {
                     "title": "New Website Analysis",
                     "messages": [
-                        {"role": "assistant", "content": "Hello! I'm your Website Analyzer. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
+                        {"role": "assistant", "content": "Hello! I'm your Nav Assist. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
                     ],
                     "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                 }
@@ -292,6 +358,28 @@ def render_sidebar():
                     st.session_state.model_name = model_name
                     logger.debug(f"Changed model to: {model_name}")
                 
+                # LangSmith settings
+                if st.session_state.get('langsmith_enabled', False):
+                    st.subheader("LangSmith Settings")
+                    project_name = st.text_input(
+                        "Project Name",
+                        value=st.session_state.get('langsmith_project', 'nav-assist'),
+                        help="Project name for grouping metrics in LangSmith"
+                    )
+                    if project_name != st.session_state.get('langsmith_project', 'nav-assist'):
+                        st.session_state.langsmith_project = project_name
+                        os.environ["LANGSMITH_PROJECT"] = project_name
+                        st.success(f"Updated LangSmith project to: {project_name}")
+                    
+                    # Toggle for detailed tracing
+                    detailed_tracing = st.checkbox(
+                        "Detailed Tracing",
+                        value=st.session_state.get('detailed_tracing', True),
+                        help="Enable more detailed trace collection in LangSmith"
+                    )
+                    if detailed_tracing != st.session_state.get('detailed_tracing', True):
+                        st.session_state.detailed_tracing = detailed_tracing
+                
                 # Debugging section
                 st.subheader("Debugging")
                 if st.button("Check OpenAI API Connection"):
@@ -324,12 +412,45 @@ def render_sidebar():
                                     st.code(str(e))
                     except Exception as e:
                         st.error(f"Error testing API: {str(e)}")
+                
+                # Add LangSmith connection test
+                if st.session_state.get('langsmith_enabled', False):
+                    if st.button("Check LangSmith Connection"):
+                        try:
+                            from langsmith import Client
+                            
+                            # Get current LangSmith API key
+                            langsmith_key = st.session_state.get('langsmith_api_key')
+                            if not langsmith_key:
+                                langsmith_key = os.getenv("LANGSMITH_API_KEY")
+                            
+                            if not langsmith_key:
+                                st.error("No LangSmith API key found to test")
+                            else:
+                                # Test LangSmith connection
+                                with st.spinner("Testing LangSmith connection..."):
+                                    try:
+                                        # First set the key in environment
+                                        os.environ["LANGSMITH_API_KEY"] = langsmith_key
+                                        
+                                        # Initialize the client
+                                        client = Client(api_key=langsmith_key)
+                                        
+                                        # Test with a simple query to get projects list
+                                        _ = client.list_projects()
+                                        
+                                        st.success("✅ LangSmith connection successful!")
+                                    except Exception as e:
+                                        st.error(f"❌ LangSmith connection failed: {str(e)}")
+                                        st.code(str(e))
+                        except Exception as e:
+                            st.error(f"Error testing LangSmith: {str(e)}")
             
             # Help section
             st.subheader("Help & Information")
             with st.expander("About This App"):
                 st.markdown("""
-                ### Website Analyzer
+                ### Nav Assist
                 
                 This application uses AI to analyze websites and find information. The process works in two steps:
                 
@@ -342,6 +463,7 @@ def render_sidebar():
                 - **Intelligent Content Analysis**: Identifies key topics and main content areas
                 - **Form Detection**: Recognizes different types of forms like contact, login, or search
                 - **Social Media Integration**: Detects social profiles linked from the website
+                - **Prompt Metrics Tracking**: Uses LangSmith to track and optimize AI prompts
                 
                 **Examples of what you can ask:**
                 
@@ -355,3 +477,85 @@ def render_sidebar():
                 
                 The app uses a headless browser controlled by AI to navigate the website on your behalf.
                 """)
+        
+        # Metrics tab
+        with metrics_tab:
+            st.subheader("Prompt Metrics Dashboard")
+            
+            if not st.session_state.get('langsmith_enabled', False):
+                st.warning("LangSmith metrics tracking is not enabled. Enable it in the Settings tab to view metrics.")
+                
+                # Add a button to directly open settings tab
+                if st.button("Enable LangSmith Tracking"):
+                    # Set the settings tab as active
+                    st.experimental_set_query_params(tab="Settings")
+                    st.rerun()
+            else:
+                # Refresh button
+                if st.button("Refresh Metrics"):
+                    st.rerun()
+                
+                # Get metrics from LangSmith
+                with st.spinner("Loading metrics from LangSmith..."):
+                    try:
+                        metrics = get_project_metrics(st.session_state.get('langsmith_project', 'nav-assist'))
+                        
+                        if 'error' in metrics:
+                            st.error(f"Error retrieving metrics: {metrics['error']}")
+                        else:
+                            # Show metrics
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Total Runs", metrics.get('total_runs', 0))
+                            with col2:
+                                st.metric("Success Rate", f"{metrics.get('success_rate', 0):.1f}%")
+                            with col3:
+                                st.metric("Avg Latency", f"{metrics.get('avg_latency', 0):.2f}s")
+                            
+                            # Run types breakdown
+                            st.subheader("Run Types")
+                            if metrics.get('run_types'):
+                                run_types_data = {"Type": list(metrics['run_types'].keys()), 
+                                                 "Count": list(metrics['run_types'].values())}
+                                st.dataframe(run_types_data)
+                            else:
+                                st.info("No run types data available yet")
+                            
+                            # Error types breakdown if any
+                            if metrics.get('error_types') and len(metrics['error_types']) > 0:
+                                st.subheader("Error Types")
+                                error_types_data = {"Error": list(metrics['error_types'].keys()), 
+                                                  "Count": list(metrics['error_types'].values())}
+                                st.dataframe(error_types_data)
+                    except Exception as e:
+                        st.error(f"Error retrieving metrics: {str(e)}")
+                
+                # Add link to LangSmith dashboard
+                st.markdown("[View Full Metrics Dashboard in LangSmith](https://smith.langchain.com)")
+                
+                # Add a section explaining the metrics
+                with st.expander("Understanding Metrics"):
+                    st.markdown("""
+                    ### Prompt Metrics Guide
+                    
+                    **Total Runs**: The total number of prompt requests tracked by LangSmith.
+                    
+                    **Success Rate**: Percentage of requests that completed without errors.
+                    
+                    **Avg Latency**: Average time taken to process prompts.
+                    
+                    **Run Types**:
+                    - **Browser Navigation**: Prompts used to control browser navigation
+                    - **Content Analysis**: Prompts for analyzing website content
+                    - **Query Mapping**: Prompts for mapping user queries to website sections
+                    - **Sitemap Analysis**: Prompts for analyzing website structure
+                    
+                    **Optimizing Prompts**:
+                    1. Look for run types with high error rates
+                    2. Examine high latency prompts for optimization
+                    3. Review error types to identify common issues
+                    4. Compare prompt variants to find the most effective approaches
+                    """)
+                
+                # Show link to documentation
+                st.info("For more information on how to use LangSmith for prompt metrics tracking, visit the [LangSmith documentation](https://docs.langsmith.com)")
