@@ -3,9 +3,10 @@ import os
 import traceback
 import logging
 from dotenv import load_dotenv
+import re
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, 
+# Set up logging with enhanced level
+logging.basicConfig(level=logging.DEBUG, 
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("webnavassist")
 
@@ -30,6 +31,27 @@ def set_page_config():
         st.error(f"Error setting page configuration: {str(e)}")
         st.code(traceback.format_exc())
 
+def validate_api_key(api_key):
+    """Validate API key format and structure."""
+    if not api_key:
+        return False, "API key is empty"
+    
+    # Remove any whitespace
+    api_key = api_key.strip()
+    
+    # Basic validation - OpenAI keys usually start with 'sk-' and are longer than 30 chars
+    if not api_key.startswith('sk-'):
+        return False, "API key should start with 'sk-'"
+    
+    if len(api_key) < 30:
+        return False, "API key appears too short"
+    
+    # Check for invalid characters
+    if re.search(r'[^a-zA-Z0-9_\-]', api_key):
+        return False, "API key contains invalid characters"
+        
+    return True, "Valid API key format"
+
 def load_api_key():
     """Load API key from .env file or Streamlit secrets with robust error handling."""
     api_key = None
@@ -41,31 +63,40 @@ def load_api_key():
         env_api_key = os.getenv("OPENAI_API_KEY")
         
         if env_api_key:
-            logger.info("API key loaded from .env file")
-            api_key = env_api_key
+            # Validate the key
+            is_valid, message = validate_api_key(env_api_key)
+            if is_valid:
+                logger.info(f"API key loaded from .env file: {message}")
+                api_key = env_api_key.strip()  # Remove any whitespace
+            else:
+                logger.warning(f"API key from .env file appears invalid: {message}")
         else:
             logger.info("No API key found in .env file, trying Streamlit secrets")
             
             # Try loading from Streamlit secrets
             try:
-                api_key = st.secrets["OPENAI_API_KEY"]
-                logger.info("API key loaded from Streamlit secrets")
+                secret_api_key = st.secrets.get("OPENAI_API_KEY")
+                if secret_api_key:
+                    # Validate the key
+                    is_valid, message = validate_api_key(secret_api_key)
+                    if is_valid:
+                        logger.info(f"API key loaded from Streamlit secrets: {message}")
+                        api_key = secret_api_key.strip()  # Remove any whitespace
+                    else:
+                        logger.warning(f"API key from Streamlit secrets appears invalid: {message}")
+                else:
+                    logger.warning("No API key found in Streamlit secrets")
             except Exception as secret_error:
                 logger.warning(f"Failed to load API key from Streamlit secrets: {str(secret_error)}")
         
         if not api_key:
-            logger.warning("No API key found in either .env file or Streamlit secrets")
-            st.warning("No OpenAI API key found. Please add it to your .env file or Streamlit secrets.")
+            logger.warning("No valid API key found in either .env file or Streamlit secrets")
+            st.warning("No OpenAI API key found or the key is invalid. Please add a valid key to your .env file or Streamlit secrets.")
     
     except Exception as e:
         logger.error(f"Error loading API key: {str(e)}")
         st.error(f"Error loading API key: {str(e)}")
         st.code(traceback.format_exc())
-    
-    # Mask the API key for logging (show only first 3 and last 3 characters)
-    if api_key:
-        masked_key = api_key[:3] + "..." + api_key[-3:] if len(api_key) > 6 else "***"
-        logger.info(f"API key loaded: {masked_key}")
     
     return api_key
 
@@ -127,12 +158,17 @@ def initialize_session_state():
                     "messages": st.session_state.messages.copy(),
                     "timestamp": ""
                 }
-                
-        # Set API key if available
+        
+        # Load and set API key if available
         api_key = load_api_key()
         if api_key:
             st.session_state.api_key = api_key
             st.session_state.api_key_set = True
+            # Also set it in the environment for good measure
+            os.environ["OPENAI_API_KEY"] = api_key
+            logger.debug("API key set in environment variable from session state")
+        else:
+            st.session_state.api_key_set = False
             
         logger.info("Session state initialized successfully")
             

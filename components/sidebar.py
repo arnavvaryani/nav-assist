@@ -1,6 +1,32 @@
 import streamlit as st
 import time
 import datetime
+import logging
+import os
+import re
+
+logger = logging.getLogger("sidebar")
+
+def is_valid_openai_key(api_key):
+    """Validate if the API key has the correct format."""
+    if not api_key:
+        return False, "API key is empty"
+    
+    # Remove any whitespace
+    api_key = api_key.strip()
+    
+    # Basic validation - OpenAI keys usually start with 'sk-' and are longer than 30 chars
+    if not api_key.startswith('sk-'):
+        return False, "API key should start with 'sk-'"
+    
+    if len(api_key) < 30:
+        return False, "API key is too short"
+    
+    # Check for invalid characters
+    if re.search(r'[^a-zA-Z0-9_\-]', api_key):
+        return False, "API key contains invalid characters"
+        
+    return True, "Valid API key format"
 
 def render_sidebar():
     """Render the sidebar with website analysis settings."""
@@ -11,18 +37,56 @@ def render_sidebar():
         main_tab, settings_tab = st.tabs(["Main", "Settings"])
         
         with main_tab:
-            # API Key status section
+            # API Key status section with enhanced validation
             st.subheader("API Key Status")
-            if st.session_state.api_key_set:
-                st.success("API key loaded successfully")
-            else:
-                st.error("API key not found")
-                st.info("Add OPENAI_API_KEY=your_key to your .env file")
-                api_key = st.text_input("Enter API Key", type="password")
-                if api_key and st.button("Save API Key"):
-                    st.session_state.api_key = api_key
-                    st.session_state.api_key_set = True
-                    st.rerun()
+            
+            # Check if API key is in session state and validate it
+            current_key_valid = False
+            if st.session_state.get('api_key_set', False) and st.session_state.get('api_key'):
+                is_valid, message = is_valid_openai_key(st.session_state.api_key)
+                if is_valid:
+                    st.success("API key loaded successfully")
+                    current_key_valid = True
+                else:
+                    st.error(f"Stored API key is invalid: {message}")
+                    st.session_state.api_key_set = False
+            
+            if not current_key_valid:
+                st.error("Valid API key not found")
+                st.info("Add a valid OpenAI API key below")
+                
+                # Expanded API key input with validation feedback
+                with st.form("api_key_form"):
+                    api_key = st.text_input("Enter OpenAI API Key", type="password", 
+                                        help="Your key should start with 'sk-'")
+                    submit_key = st.form_submit_button("Save API Key")
+                    
+                    if submit_key:
+                        if api_key:
+                            # Validate the key format
+                            is_valid, message = is_valid_openai_key(api_key)
+                            
+                            if is_valid:
+                                # Clean the key (remove whitespace)
+                                clean_api_key = api_key.strip()
+                                
+                                # Update session state
+                                st.session_state.api_key = clean_api_key
+                                st.session_state.api_key_set = True
+                                
+                                # Set environment variable for good measure
+                                os.environ["OPENAI_API_KEY"] = clean_api_key
+                                
+                                
+                                st.success("API key saved successfully!")
+                                st.rerun()
+                            else:
+                                st.error(f"Invalid API key: {message}")
+                        else:
+                            st.error("Please enter an API key")
+                
+                # Add a note about how to get an API key
+                st.info("You need an OpenAI API key to use this app. Get one at: https://platform.openai.com/api-keys")
             
             # Only show task suggestions if a website is being analyzed
             if st.session_state.get('website_analyzed', False) and st.session_state.get('site_data'):
@@ -215,6 +279,51 @@ def render_sidebar():
                     st.session_state.max_pages = max_pages
                 
                 st.info("⚠️ Setting higher depth values or maximum pages will increase crawl time significantly. For large websites, moderate values are recommended.")
+                
+                # API model settings (new)
+                st.subheader("API Settings")
+                model_name = st.selectbox(
+                    "OpenAI Model", 
+                    options=["gpt-4o", "gpt-4", "gpt-3.5-turbo"],
+                    index=0,
+                    help="Select which OpenAI model to use. GPT-4o is recommended but may cost more."
+                )
+                if model_name != st.session_state.get('model_name', "gpt-4o"):
+                    st.session_state.model_name = model_name
+                    logger.debug(f"Changed model to: {model_name}")
+                
+                # Debugging section
+                st.subheader("Debugging")
+                if st.button("Check OpenAI API Connection"):
+                    try:
+                        from langchain_openai import ChatOpenAI
+                        
+                        # Get current API key
+                        api_key = st.session_state.get('api_key')
+                        if not api_key:
+                            api_key = os.getenv("OPENAI_API_KEY")
+                        
+                        if not api_key:
+                            st.error("No API key found to test")
+                        else:
+                            # Test API connection
+                            with st.spinner("Testing API connection..."):
+                                try:
+                                    # First set the key in environment
+                                    os.environ["OPENAI_API_KEY"] = api_key
+                                    
+                                    # Initialize the model
+                                    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
+                                    
+                                    # Test with a simple query
+                                    _ = llm.invoke("Hello")
+                                    
+                                    st.success("✅ API connection successful!")
+                                except Exception as e:
+                                    st.error(f"❌ API connection failed: {str(e)}")
+                                    st.code(str(e))
+                    except Exception as e:
+                        st.error(f"Error testing API: {str(e)}")
             
             # Help section
             st.subheader("Help & Information")

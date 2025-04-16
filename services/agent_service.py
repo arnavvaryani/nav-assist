@@ -38,9 +38,30 @@ def run_agent_task(
     logger.info(f"Starting agent task: {task[:50]}...")
     
     try:
-        # Use provided API key or get from environment
+        # Enhanced API key handling and debugging
         if api_key:
+            # Log masked API key for debugging (only first 4 and last 4 chars)
+           
+                
+            # Clean the API key (remove any whitespace)
+            api_key = api_key.strip()
+            
+            # Set the API key in environment
             os.environ["OPENAI_API_KEY"] = api_key
+            logger.debug("API key set in environment variable")
+        else:
+            # Check if API key exists in environment
+            env_key = os.getenv("OPENAI_API_KEY")
+            if not env_key:
+                logger.error("No API key provided and none found in environment")
+                raise Exception("OpenAI API key not found. Please provide a valid API key.")
+            else:
+                # Log masked environment key
+                if len(env_key) > 10:
+                    masked_env_key = env_key[:4] + "..." + env_key[-4:]
+                    logger.debug(f"Using environment API key: {masked_env_key}")
+                else:
+                    logger.warning("Environment API key appears too short or malformed")
         
         # Create browser configuration
         browser_config = BrowserConfig(
@@ -63,17 +84,32 @@ def run_agent_task(
         browser = Browser(config=browser_config)
         context = BrowserContext(browser=browser, config=context_config)
         
-        # Initialize the language model with higher temperature for better reasoning
+        # Initialize the language model with special error handling
         logger.info("Initializing language model...")
-        llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+        try:
+            # Try to log the actual API key being used (safely masked)
+            current_api_key = os.getenv("OPENAI_API_KEY", "")
+            if current_api_key and len(current_api_key) > 10:
+                masked_current_key = current_api_key[:4] + "..." + current_api_key[-4:]
+                logger.debug(f"Current API key to be used by LLM: {masked_current_key}")
+            
+            # Initialize the model with better error handling
+            llm = ChatOpenAI(model="gpt-4o", temperature=0.2)
+            
+            # Test the API connection with a simple query
+            logger.debug("Testing API connection with a simple query...")
+            test_result = llm.invoke("Hello")
+            logger.debug("API connection test successful")
+            
+        except Exception as llm_error:
+            logger.error(f"Error initializing language model: {str(llm_error)}")
+            logger.error(traceback.format_exc())
+            raise Exception(f"Failed to initialize language model: {str(llm_error)}")
         
         logger.info("Running agent task with query mapping...")
         
         # Prepare the complete task with context
         complete_task = f"TASK: {task}"
-        
-        # Don't automatically add the base URL instruction - let the agent decide where to start
-        # based on the query mapping process described in the system prompt
         
         # Run the task using async function
         result = asyncio.run(_run_agent_async(context, complete_task, llm, system_prompt, base_url))
