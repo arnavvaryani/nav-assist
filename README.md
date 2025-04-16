@@ -1,2 +1,1 @@
-# nav-assist
-Prompt engineering project - Nav Assist
+D:\Nav-Assist\Agent\nav_assist_env311\Scripts\activate
