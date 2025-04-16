@@ -1738,6 +1738,17 @@ sentry = ["django", "sentry-sdk"]
 test = ["anthropic", "coverage", "django", "flake8", "freezegun (==1.5.1)", "langchain-anthropic (>=0.2.0)", "langchain-community (>=0.2.0)", "langchain-openai (>=0.2.0)", "langgraph", "mock (>=2.0.0)", "openai", "parameterized (>=0.8.1)", "pydantic", "pylint", "pytest", "pytest-asyncio", "pytest-timeout"]
 
 [[package]]
+name = "promptfoo"
+version = "0.1.0"
+description = "LLM evals and red teaming"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "promptfoo-0.1.0-py3-none-any.whl", hash = "sha256:1f246b22f6d3af997a501cdf480c13543c6639734f3321d9acc5a4529eef5d2f"},
+    {file = "promptfoo-0.1.0.tar.gz", hash = "sha256:44a3ad4b90bdb720ed28268dd4fba5263ca1ff0061f261775d36a0b1e1faa4b4"},
+]
+
+[[package]]
 name = "protobuf"
 version = "5.29.4"
 description = ""
@@ -2899,4 +2910,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "23eb6c74306b26d55dc3afe979654a138d0ce849b4336aad091bbc782fced84b"
+content-hash = "8486c7cdd716e5d4917ee61d6b85dc0bea0924c56b93779a6b585485493b7154"

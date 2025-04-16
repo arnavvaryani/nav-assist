@@ -1,0 +1,13 @@
+
+TASK: Find pricing information
+
+To help the user find information on https://example.com, follow this approach:
+
+1. Understand user intent: What specific information are they looking for?
+2. Map intent to website structure: Which sections or pages most likely contain this information?
+3. Navigate efficiently: Go directly to the most relevant pages first
+4. Verify information: Ensure you're finding accurate, up-to-date content
+5. Explain clearly: Provide a concise but complete answer
+6. Cite sources: Reference the specific pages where you found each piece of information
+
+Your goal is to save the user time by navigating the website for them and extracting exactly what they need.

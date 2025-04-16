@@ -19,6 +19,7 @@ playwright = "^1.51.0"
 langchain = "^0.3.23"
 python-dotenv = "^1.1.0"
 matplotlib = "^3.10.1"
+promptfoo = "^0.1.0"
 
 
 
