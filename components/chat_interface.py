@@ -12,7 +12,7 @@ from services.sitemap_service import generate_sitemap
 from services.prompts import generate_system_prompt, generate_website_analyzed_message, generate_task_prompt
 from components.url_input import render_url_input
 from components.sitemap_display import display_sitemap
-from components.query_mapping_display import display_query_mapping
+from components.query_mapping_display import display_query_mapping, _find_relevant_pages_with_ai, _find_relevant_pages_with_keywords, _extract_keywords
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 
@@ -140,12 +140,6 @@ def render_chat_interface():
                 st.session_state.agent_result = None
                 st.rerun()
         
-        # Agent Results display
-        if st.session_state.agent_result:
-            with st.expander("Last Task Results", expanded=True):
-                st.markdown("**Results from your last request:**")
-                st.markdown(st.session_state.agent_result)
-        
         # Chat Messages Display
         st.subheader("Conversation")
         chat_container = st.container()
@@ -164,7 +158,11 @@ def render_chat_interface():
         # Chat Input (only if website is analyzed)
         if st.session_state.website_analyzed:
             try:
-                placeholder_text = f"Ask about {st.session_state.site_data['title']}..."
+                # Use a safer way to get placeholder text
+                if st.session_state.site_data and isinstance(st.session_state.site_data, dict) and 'title' in st.session_state.site_data:
+                    placeholder_text = f"Ask about {st.session_state.site_data['title']}..."
+                else:
+                    placeholder_text = "Ask about this website..."
                     
                 # Process user input
                 if user_input := st.chat_input(placeholder_text):
@@ -181,9 +179,11 @@ def render_chat_interface():
                     with st.chat_message("user"):
                         st.markdown(user_input)
                     
-                    # Show query mapping analysis before processing
-                    with st.expander("Query Mapping Analysis", expanded=False):
-                        display_query_mapping(user_input, st.session_state.site_data)
+                    # Check if site_data is available before query mapping
+                    if st.session_state.site_data and isinstance(st.session_state.site_data, dict):
+                        # Show query mapping analysis before processing
+                        with st.expander("Query Mapping Analysis", expanded=False):
+                            display_query_mapping(user_input, st.session_state.site_data)
                     
                     # Process the input with agent
                     with st.spinner("Working on your request... This may take a moment."):
@@ -216,6 +216,15 @@ def _process_agent_input(user_input):
             
             # Run the agent task
             try:
+                # Check if site_data is available - important!
+                if not st.session_state.get('site_data') or not isinstance(st.session_state.site_data, dict):
+                    thinking_placeholder.empty()
+                    error_message = "❌ Unable to process your request: Website data is missing.\n\n"
+                    error_message += "Please analyze a website first by entering a URL in the input field."
+                    st.markdown(error_message)
+                    st.session_state.messages.append({"role": "assistant", "content": error_message})
+                    return
+                
                 # Get browser settings from session state
                 headless = st.session_state.get('headless', True)
                 browser_width = st.session_state.get('browser_width', 1280)
@@ -224,14 +233,59 @@ def _process_agent_input(user_input):
                 # Generate system prompt from site data
                 system_prompt = generate_system_prompt(st.session_state.site_data)
                 
-                # Generate task-specific prompt based on user input
-                task_prompt = user_input  # Simplified - just use the direct user input
+                # Find most relevant page using query mapping
+                starting_url = None
+                try:
+                    # Try AI approach first
+                    relevant_pages = _find_relevant_pages_with_ai(user_input, st.session_state.site_data)
+                    
+                    # Log the relevant pages found
+                    logger.info(f"Found {len(relevant_pages)} relevant pages using AI approach")
+                    
+                except Exception as ai_error:
+                    # Log the error
+                    logger.warning(f"Error using AI for page matching: {str(ai_error)}")
+                    logger.info("Falling back to keyword matching")
+                    
+                    # Fall back to keyword matching
+                    keywords = _extract_keywords(user_input)
+                    relevant_pages = _find_relevant_pages_with_keywords(user_input, keywords, st.session_state.site_data)
+                    
+                    logger.info(f"Found {len(relevant_pages)} relevant pages using keyword matching")
                 
-                # Run agent with system prompt
+                # Determine starting URL - use the top-scoring page if available
+                if relevant_pages and len(relevant_pages) > 0:
+                    # Get the top-scoring page URL
+                    top_page = relevant_pages[0]
+                    candidate_url = top_page.get('url', None)
+                    
+                    # If this is an anchor link, it's not a real URL, so ignore it
+                    if candidate_url and not candidate_url.startswith('#'):
+                        starting_url = candidate_url
+                        
+                        # Make sure the URL is absolute
+                        if not starting_url.startswith(('http://', 'https://')):
+                            # Try to make it absolute based on the base URL
+                            if st.session_state.website_url:
+                                import urllib.parse
+                                starting_url = urllib.parse.urljoin(st.session_state.website_url, starting_url)
+                    
+                    # Log the starting URL choice
+                    if starting_url:
+                        logger.info(f"Starting navigation from relevant page: {starting_url} (Score: {top_page.get('score', 'N/A')})")
+                        thinking_placeholder.markdown(f"🤔 I'm processing your request...\n\nStarting with the most relevant page: {starting_url}")
+                    else:
+                        logger.info("No suitable starting URL found from relevant pages, using base URL")
+                
+                # Generate task-specific prompt based on user input
+                task_prompt = user_input
+                
+                # Run agent with system prompt and determined starting URL
                 result = asyncio.run(run_agent_task(
                     task=task_prompt,
                     system_prompt=system_prompt,
                     base_url=st.session_state.website_url,
+                    starting_url=starting_url,  # Use the relevant page URL if available
                     api_key=st.session_state.api_key,
                     headless=headless,
                     browser_width=browser_width,
@@ -304,51 +358,21 @@ def _process_agent_input(user_input):
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 else:
-                    # Extract summary for the chat message
-                    summary = ""
-                    if "## Summary" in cleaned_result:
-                        summary_parts = cleaned_result.split("## Summary")
-                        if len(summary_parts) > 1:
-                            # Get text until the next heading
-                            next_section = summary_parts[1].split("##")[0] if "##" in summary_parts[1] else summary_parts[1]
-                            summary = next_section.strip()
-                    elif "## Information Found" in cleaned_result:
-                        info_parts = cleaned_result.split("## Information Found")
-                        if len(info_parts) > 1:
-                            # Get the first paragraph of information
-                            info_text = info_parts[1].strip()
-                            summary_end = info_text.find("\n\n")
-                            if summary_end > 0:
-                                summary = info_text[:summary_end]
-                            else:
-                                summary = info_text
-                    else:
-                        # Use first paragraph as summary
-                        paragraphs = cleaned_result.split('\n\n')
-                        if paragraphs:
-                            summary = paragraphs[0]
+                    # Instead of showing a brief summary, show the full cleaned result directly
+                    # Include a header to make it clear what the result is
+                    full_response = f"✅ **Results for:** \"{user_input}\" on {st.session_state.website_url}\n\n"
                     
-                    # Generate response message for normal results
-                    response = f"✅ I've found information about \"{user_input}\" on {st.session_state.website_url}\n\n"
+                    # Add information about starting URL if used
+                    if starting_url and starting_url != st.session_state.website_url:
+                        full_response += f"*Started search from the most relevant page: {starting_url}*\n\n"
+                        
+                    full_response += cleaned_result
                     
-                    # Add summary to the response
-                    if summary:
-                        response += f"**Summary of findings:**\n\n{summary}\n\n"
-                    else:
-                        # If no clear summary, truncate the full result
-                        preview_length = min(500, len(cleaned_result))
-                        result_preview = cleaned_result[:preview_length]
-                        if len(cleaned_result) > preview_length:
-                            result_preview += "..."
-                        response += f"**Findings:**\n\n{result_preview}\n\n"
+                    # Display the full response in the chat
+                    st.markdown(full_response)
                     
-                    if len(cleaned_result) > 500:
-                        response += "_Full results are available in the expandable section above._"
-                    
-                    st.markdown(response)
-                    
-                    # Add assistant message to chat history
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    # Add the full response to the chat history
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
                 
             except Exception as agent_error:
                 logger.error(f"Error running agent task: {str(agent_error)}")

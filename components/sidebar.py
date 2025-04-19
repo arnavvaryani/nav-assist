@@ -5,6 +5,9 @@ import logging
 import os
 import re
 from langsmith_config import get_project_metrics
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
 
 logger = logging.getLogger("sidebar")
 
@@ -154,7 +157,7 @@ def render_sidebar():
                 # Add a note about LangSmith
                 st.info("LangSmith helps track and optimize AI prompts. Get an API key at: https://smith.langchain.com/")
             
-            # Only show task suggestions if a website is being analyzed
+            # Only show website info if a website is being analyzed
             if st.session_state.get('website_analyzed', False) and st.session_state.get('site_data'):
                 site_title = st.session_state.site_data.get('title', 'this website')
                 base_url = st.session_state.website_url
@@ -163,66 +166,6 @@ def render_sidebar():
                 st.subheader("Current Website")
                 st.write(f"**Analyzing:** {site_title}")
                 st.write(f"**URL:** {base_url}")
-                
-                # Task suggestions
-                st.subheader("Task Suggestions")
-                st.write("Try these examples:")
-                
-                # Dynamic examples based on the current website
-                if st.session_state.site_data.get('navigation_links'):
-                    # Extract main navigation sections
-                    nav_sections = {}
-                    for link in st.session_state.site_data['navigation_links']:
-                        section = link.get('section', 'Main Navigation')
-                        if section not in nav_sections:
-                            nav_sections[section] = []
-                        nav_sections[section].append(link)
-                    
-                    # Generate examples based on navigation
-                    examples = []
-                    for section, links in nav_sections.items():
-                        if links:
-                            # Use first link in each section for examples
-                            link_text = links[0]['text']
-                            examples.append(f"Find information about {link_text}")
-                    
-                    # Add form-related examples if forms are detected
-                    if st.session_state.site_data.get('forms'):
-                        form_purposes = {form.get('purpose', 'unknown') for form in st.session_state.site_data['forms']}
-                        for purpose in form_purposes:
-                            if purpose not in ('unknown', 'search'):
-                                examples.append(f"How do I {purpose} on {site_title}?")
-                            elif purpose == 'search':
-                                examples.append(f"How can I search on {site_title}?")
-                    
-                    # Add social media related examples if social links detected
-                    if st.session_state.site_data.get('social_links'):
-                        examples.append(f"What social media profiles does {site_title} have?")
-                    
-                    # Add more general examples
-                    examples.extend([
-                        f"What are the main topics covered on {site_title}?",
-                        f"Find contact information on {site_title}",
-                        f"What products or services does {site_title} offer?",
-                        f"Search for pricing information on {site_title}"
-                    ])
-                else:
-                    # Generic examples if no navigation found
-                    examples = [
-                        f"What is {site_title} about?",
-                        f"Find the main sections of {site_title}",
-                        f"What contact information is available?",
-                        f"Find information about products or services",
-                        f"Look for pricing or cost information"
-                    ]
-                
-                # Display example buttons (limit to 5)
-                for example in examples[:5]:
-                    if st.button(example, key=f"example_{hash(example)}"):
-                        new_message = {"role": "user", "content": example}
-                        st.session_state.messages.append(new_message)
-                        st.session_state.conversations[st.session_state.current_conversation_id]["messages"] = st.session_state.messages
-                        st.rerun()
             
             # Conversation management section
             st.subheader("Analyses History")
@@ -272,12 +215,36 @@ def render_sidebar():
                 if selected_conversation != st.session_state.current_conversation_id:
                     # Load the selected conversation
                     st.session_state.current_conversation_id = selected_conversation
-                    st.session_state.messages = st.session_state.conversations[selected_conversation]["messages"]
+                    st.session_state.messages = st.session_state.conversations[selected_conversation]["messages"].copy()
                     
                     # Restore website URL and analyzed state if available
                     if "url" in st.session_state.conversations[selected_conversation]:
-                        st.session_state.website_url = st.session_state.conversations[selected_conversation]["url"]
-                        st.session_state.website_analyzed = True
+                        url = st.session_state.conversations[selected_conversation]["url"]
+                        st.session_state.website_url = url
+                        
+                        # Check if site_data needs to be regenerated
+                        if st.session_state.get('site_data') is None:
+                            # We need to regenerate the site data from the URL
+                            try:
+                                st.session_state.website_analyzed = True
+                                
+                                # Use a spinner to show that we're loading data
+                                with st.spinner(f"Restoring website data for {url}..."):
+                                    # Only generate minimal data to avoid a full recrawl
+                                    minimal_site_data = {
+                                        "url": url,
+                                        "title": st.session_state.conversations[selected_conversation].get("title", "Website"),
+                                        "internal_link_count": 0,
+                                        "external_link_count": 0,
+                                        "content_sections": []
+                                    }
+                                    st.session_state.site_data = minimal_site_data
+                            except Exception as e:
+                                logger.error(f"Error restoring site data: {str(e)}")
+                                st.error(f"Could not restore website data. Please analyze the website again.")
+                                st.session_state.website_analyzed = False
+                        else:
+                            st.session_state.website_analyzed = True
                     else:
                         # If this is an old conversation without URL info, reset analysis state
                         st.session_state.website_analyzed = False
@@ -465,22 +432,12 @@ def render_sidebar():
                 - **Social Media Integration**: Detects social profiles linked from the website
                 - **Prompt Metrics Tracking**: Uses LangSmith to track and optimize AI prompts
                 
-                **Examples of what you can ask:**
-                
-                - Find pricing information on a product or service
-                - Locate contact information or support options
-                - Extract key information from specific sections
-                - Find documentation or help resources
-                - Research company information or policies
-                - How to interact with forms on the website
-                - Find social media profiles
-                
                 The app uses a headless browser controlled by AI to navigate the website on your behalf.
                 """)
         
-        # Metrics tab
+        # Metrics tab - Enhanced with improved metrics
         with metrics_tab:
-            st.subheader("Prompt Metrics Dashboard")
+            st.subheader("Website Analysis Metrics")
             
             if not st.session_state.get('langsmith_enabled', False):
                 st.warning("LangSmith metrics tracking is not enabled. Enable it in the Settings tab to view metrics.")
@@ -491,6 +448,9 @@ def render_sidebar():
                     st.experimental_set_query_params(tab="Settings")
                     st.rerun()
             else:
+                # Add time range selection
+                days_back = st.slider("Time range (days)", min_value=1, max_value=30, value=7)
+                
                 # Refresh button
                 if st.button("Refresh Metrics"):
                     st.rerun()
@@ -498,12 +458,16 @@ def render_sidebar():
                 # Get metrics from LangSmith
                 with st.spinner("Loading metrics from LangSmith..."):
                     try:
-                        metrics = get_project_metrics(st.session_state.get('langsmith_project', 'nav-assist'))
+                        metrics = get_project_metrics(
+                            st.session_state.get('langsmith_project', 'nav-assist'),
+                            days=days_back
+                        )
                         
                         if 'error' in metrics:
                             st.error(f"Error retrieving metrics: {metrics['error']}")
                         else:
-                            # Show metrics
+                            # Top-level metrics in columns
+                            st.subheader("Overall Statistics")
                             col1, col2, col3 = st.columns(3)
                             with col1:
                                 st.metric("Total Runs", metrics.get('total_runs', 0))
@@ -511,51 +475,162 @@ def render_sidebar():
                                 st.metric("Success Rate", f"{metrics.get('success_rate', 0):.1f}%")
                             with col3:
                                 st.metric("Avg Latency", f"{metrics.get('avg_latency', 0):.2f}s")
+                                
+                            # Add a second row for website-specific metrics
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric("Websites Analyzed", len(metrics.get('websites_analyzed', [])))
+                            with col2:
+                                component_count = len(metrics.get('component_stats', {}))
+                                st.metric("Components Used", component_count)
                             
-                            # Run types breakdown
-                            st.subheader("Run Types")
-                            if metrics.get('run_types'):
-                                run_types_data = {"Type": list(metrics['run_types'].keys()), 
-                                                 "Count": list(metrics['run_types'].values())}
-                                st.dataframe(run_types_data)
+                            # Add usage graph over time if data is available
+                            st.subheader("Usage Over Time")
+                            daily_usage = metrics.get('daily_usage', [])
+                            if daily_usage:
+                                # Create dataframe for charting
+                                df = pd.DataFrame(daily_usage)
+                                
+                                # Create a simple bar chart
+                                fig, ax = plt.subplots(figsize=(10, 4))
+                                ax.bar(df['date'], df['runs'], label='Total Runs')
+                                ax.bar(df['date'], df['success'], label='Successful Runs', alpha=0.7)
+                                ax.set_xlabel('Date')
+                                ax.set_ylabel('Number of Runs')
+                                ax.set_title('Usage Over Time')
+                                ax.legend()
+                                plt.xticks(rotation=45)
+                                plt.tight_layout()
+                                
+                                # Display the chart
+                                st.pyplot(fig)
                             else:
-                                st.info("No run types data available yet")
+                                st.info("No daily usage data available yet")
                             
-                            # Error types breakdown if any
-                            if metrics.get('error_types') and len(metrics['error_types']) > 0:
-                                st.subheader("Error Types")
-                                error_types_data = {"Error": list(metrics['error_types'].keys()), 
-                                                  "Count": list(metrics['error_types'].values())}
-                                st.dataframe(error_types_data)
+                            # Component performance
+                            st.subheader("Component Performance")
+                            component_stats = metrics.get('component_stats', {})
+                            if component_stats:
+                                # Format component stats for display
+                                component_data = []
+                                for component, stats in component_stats.items():
+                                    # Make component name more readable
+                                    component_name = component.replace('_', ' ').title()
+                                    component_data.append({
+                                        "Component": component_name,
+                                        "Runs": stats.get('count', 0),
+                                        "Success Rate": f"{stats.get('success_rate', 0):.1f}%",
+                                        "Avg Latency": f"{stats.get('avg_latency', 0):.2f}s"
+                                    })
+                                
+                                # Display as a dataframe
+                                component_df = pd.DataFrame(component_data)
+                                st.dataframe(component_df, use_container_width=True)
+                                
+                                # Display component usage as a pie chart
+                                fig, ax = plt.subplots()
+                                components = [d["Component"] for d in component_data]
+                                values = [d["Runs"] for d in component_data]
+                                
+                                # Only show if we have meaningful data
+                                if sum(values) > 0:
+                                    ax.pie(values, labels=components, autopct='%1.1f%%')
+                                    ax.set_title('Component Usage')
+                                    st.pyplot(fig)
+                            else:
+                                st.info("No component data available yet")
+                                
+                            # Query type analysis (if available)
+                            query_types = metrics.get('queries_by_type', {})
+                            if query_types:
+                                st.subheader("Query Types")
+                                
+                                # Format query types for display (make names more readable)
+                                readable_types = {
+                                    "information_finding": "Information Finding",
+                                    "explanation": "Explanations",
+                                    "how_to": "How-To Instructions",
+                                    "contact_info": "Contact Information",
+                                    "pricing": "Pricing Information",
+                                    "other": "Other Queries"
+                                }
+                                
+                                query_data = []
+                                for q_type, count in query_types.items():
+                                    display_name = readable_types.get(q_type, q_type.replace('_', ' ').title())
+                                    query_data.append({
+                                        "Query Type": display_name,
+                                        "Count": count
+                                    })
+                                
+                                # Display as a dataframe and chart
+                                query_df = pd.DataFrame(query_data)
+                                col1, col2 = st.columns([1, 2])
+                                
+                                with col1:
+                                    st.dataframe(query_df, use_container_width=True)
+                                    
+                                with col2:
+                                    # Display as a horizontal bar chart
+                                    fig, ax = plt.subplots()
+                                    y_pos = range(len(query_data))
+                                    counts = [d["Count"] for d in query_data]
+                                    labels = [d["Query Type"] for d in query_data]
+                                    
+                                    # Only display if we have data
+                                    if len(counts) > 0:
+                                        ax.barh(y_pos, counts)
+                                        ax.set_yticks(y_pos)
+                                        ax.set_yticklabels(labels)
+                                        ax.set_xlabel('Count')
+                                        ax.set_title('Query Types')
+                                        plt.tight_layout()
+                                        st.pyplot(fig)
+                            
+                            # Recent runs (show the last few activities)
+                            st.subheader("Recent Activities")
+                            recent_runs = metrics.get('most_recent_runs', [])
+                            if recent_runs:
+                                # Format runs for display
+                                recent_data = []
+                                for run in recent_runs:
+                                    # Format timestamp nicely
+                                    timestamp = run.get('timestamp')
+                                    if timestamp:
+                                        formatted_time = timestamp.strftime('%Y-%m-%d %H:%M')
+                                    else:
+                                        formatted_time = "Unknown"
+                                        
+                                    # Format component name nicely
+                                    component = run.get('component', 'unknown')
+                                    component_name = component.replace('_', ' ').title()
+                                    
+                                    # Add status icon
+                                    status = "✅" if run.get('success', False) else "❌"
+                                    
+                                    recent_data.append({
+                                        "Time": formatted_time,
+                                        "Type": run.get('type', 'Unknown'),
+                                        "Component": component_name,
+                                        "Status": status,
+                                    })
+                                
+                                # Display as a dataframe
+                                recent_df = pd.DataFrame(recent_data)
+                                st.dataframe(recent_df, use_container_width=True)
+                            else:
+                                st.info("No recent activity data available")
+                            
+                            # Error types if any
+                            error_types = metrics.get('error_types', {})
+                            if error_types and len(error_types) > 0:
+                                with st.expander("Error Types"):
+                                    error_data = {"Error": list(error_types.keys()), 
+                                                "Count": list(error_types.values())}
+                                    st.dataframe(error_data)
+                    
                     except Exception as e:
                         st.error(f"Error retrieving metrics: {str(e)}")
                 
                 # Add link to LangSmith dashboard
                 st.markdown("[View Full Metrics Dashboard in LangSmith](https://smith.langchain.com)")
-                
-                # Add a section explaining the metrics
-                with st.expander("Understanding Metrics"):
-                    st.markdown("""
-                    ### Prompt Metrics Guide
-                    
-                    **Total Runs**: The total number of prompt requests tracked by LangSmith.
-                    
-                    **Success Rate**: Percentage of requests that completed without errors.
-                    
-                    **Avg Latency**: Average time taken to process prompts.
-                    
-                    **Run Types**:
-                    - **Browser Navigation**: Prompts used to control browser navigation
-                    - **Content Analysis**: Prompts for analyzing website content
-                    - **Query Mapping**: Prompts for mapping user queries to website sections
-                    - **Sitemap Analysis**: Prompts for analyzing website structure
-                    
-                    **Optimizing Prompts**:
-                    1. Look for run types with high error rates
-                    2. Examine high latency prompts for optimization
-                    3. Review error types to identify common issues
-                    4. Compare prompt variants to find the most effective approaches
-                    """)
-                
-                # Show link to documentation
-                st.info("For more information on how to use LangSmith for prompt metrics tracking, visit the [LangSmith documentation](https://docs.langsmith.com)")

@@ -98,9 +98,14 @@ def display_query_mapping(user_query: str, site_data: Dict[str, Any], top_n: int
         # Highlight the most relevant page
         if relevant_pages:
             best_match = relevant_pages[0]
-            st.success(f"**Best Match:** {best_match['title']} ({best_match['url']})")
+            st.success(f"**Best Match:** {best_match['title']} ({best_match['url']}) with score {best_match['score']:.1f}")
+            
+            # Store the top match for use in navigation
+            # This could be useful if we want to access it elsewhere
+            st.session_state['top_matched_page'] = best_match
     else:
         st.warning("No specific pages could be matched to the query. Starting from the homepage.")
+        st.session_state['top_matched_page'] = None
 
 def _extract_keywords(text: str) -> List[str]:
     """Extract keywords from text."""
@@ -344,6 +349,7 @@ Return exactly 5 pages (or fewer if there aren't enough matches), ordered by rel
     except SecurityBreachException:
         # Re-raise security breach exception to be handled by the caller
         raise
+            
     except Exception as e:
         logger.error(f"Error using OpenAI for page matching: {str(e)}")
         # Re-raise to trigger fallback
