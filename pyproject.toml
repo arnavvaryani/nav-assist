@@ -11,12 +11,10 @@ packages = [
 
 [tool.poetry.dependencies]
 python = "^3.11"
-langchain-openai = "0.3.1"
-browser-use = "^0.1.40"
+browser-use = "^0.1.41"
 nest-asyncio = "^1.6.0"
 streamlit = "^1.44.1"
 playwright = "^1.51.0"
-langchain = "^0.3.23"
 python-dotenv = "^1.1.0"
 matplotlib = "^3.10.1"
 promptfoo = "^0.1.0"

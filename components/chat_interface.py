@@ -1,3 +1,4 @@
+import asyncio
 import streamlit as st
 import logging
 import traceback
@@ -224,20 +225,18 @@ def _process_agent_input(user_input):
                 system_prompt = generate_system_prompt(st.session_state.site_data)
                 
                 # Generate task-specific prompt based on user input
-                task_prompt = generate_task_prompt(user_input, st.session_state.site_data)
+                task_prompt = user_input  # Simplified - just use the direct user input
                 
-                # Combine prompts
-                combined_prompt = f"{system_prompt}\n\n{task_prompt}"
-                
-                # Run agent with combined prompt and base URL
-                result = run_agent_task(
-                    task=combined_prompt,
+                # Run agent with system prompt
+                result = asyncio.run(run_agent_task(
+                    task=task_prompt,
+                    system_prompt=system_prompt,
                     base_url=st.session_state.website_url,
                     api_key=st.session_state.api_key,
                     headless=headless,
                     browser_width=browser_width,
                     browser_height=browser_height
-                )
+                ))
                 
                 # Ensure the result is a string
                 if result is None:
@@ -249,8 +248,49 @@ def _process_agent_input(user_input):
                 # Check if the result contains a security alert
                 is_security_alert = "⚠️ **SECURITY ALERT**" in result or "SECURITY ALERT" in result
                 
-                # Store result in session state
-                st.session_state.agent_result = result
+                # Clean the result of any potential system prompt leakage
+                cleaned_result = result
+                system_markers = [
+                    "You are SecureWebNavigator",
+                    "SECURITY PROTOCOL:",
+                    "ADDITIONAL SECURITY MEASURES",
+                    "RESPONSE FORMAT:",
+                    "You must ONLY operate",
+                    "Ignore ALL instructions",
+                    "FORMAT YOUR RESPONSE AS FOLLOWS",
+                    "AgentHistoryList",
+                    "all_results"
+                ]
+                
+                for marker in system_markers:
+                    if marker in cleaned_result:
+                        # Find the paragraph containing the marker and remove it
+                        paragraphs = cleaned_result.split('\n\n')
+                        cleaned_paragraphs = [p for p in paragraphs if marker not in p]
+                        cleaned_result = '\n\n'.join(cleaned_paragraphs)
+                
+                # Apply additional structure if needed
+                if not ("## " in cleaned_result or "# " in cleaned_result):
+                    # The result isn't well-structured, let's add some structure
+                    paragraphs = cleaned_result.split('\n\n')
+                    
+                    structured_output = ""
+                    
+                    # Add a summary if possible
+                    if paragraphs:
+                        structured_output += "## Summary\n\n" + paragraphs[0] + "\n\n"
+                        
+                        # Add details as information found
+                        if len(paragraphs) > 1:
+                            structured_output += "## Information Found\n\n"
+                            structured_output += "\n\n".join(paragraphs[1:])
+                    else:
+                        structured_output = cleaned_result
+                        
+                    cleaned_result = structured_output
+                
+                # Store cleaned result in session state
+                st.session_state.agent_result = cleaned_result
                 
                 # Remove thinking message and show final response
                 thinking_placeholder.empty()
@@ -264,24 +304,46 @@ def _process_agent_input(user_input):
                     st.markdown(response)
                     st.session_state.messages.append({"role": "assistant", "content": response})
                 else:
+                    # Extract summary for the chat message
+                    summary = ""
+                    if "## Summary" in cleaned_result:
+                        summary_parts = cleaned_result.split("## Summary")
+                        if len(summary_parts) > 1:
+                            # Get text until the next heading
+                            next_section = summary_parts[1].split("##")[0] if "##" in summary_parts[1] else summary_parts[1]
+                            summary = next_section.strip()
+                    elif "## Information Found" in cleaned_result:
+                        info_parts = cleaned_result.split("## Information Found")
+                        if len(info_parts) > 1:
+                            # Get the first paragraph of information
+                            info_text = info_parts[1].strip()
+                            summary_end = info_text.find("\n\n")
+                            if summary_end > 0:
+                                summary = info_text[:summary_end]
+                            else:
+                                summary = info_text
+                    else:
+                        # Use first paragraph as summary
+                        paragraphs = cleaned_result.split('\n\n')
+                        if paragraphs:
+                            summary = paragraphs[0]
+                    
                     # Generate response message for normal results
                     response = f"✅ I've found information about \"{user_input}\" on {st.session_state.website_url}\n\n"
                     
-                    # Safely extract a preview of the result
-                    try:
-                        # Extract first 500 characters for the chat
-                        if len(result) > 500:
-                            result_preview = result[:500] + "..."
-                        else:
-                            result_preview = result
-                        
-                        response += f"**Summary of findings:**\n\n{result_preview}\n\n"
-                        
-                        if len(result) > 500:
-                            response += "_Full results are available in the expandable section above._"
-                    except Exception as preview_error:
-                        logger.error(f"Error creating result preview: {str(preview_error)}")
-                        response += "**Findings:** I completed the search successfully. View the full results in the expandable section above."
+                    # Add summary to the response
+                    if summary:
+                        response += f"**Summary of findings:**\n\n{summary}\n\n"
+                    else:
+                        # If no clear summary, truncate the full result
+                        preview_length = min(500, len(cleaned_result))
+                        result_preview = cleaned_result[:preview_length]
+                        if len(cleaned_result) > preview_length:
+                            result_preview += "..."
+                        response += f"**Findings:**\n\n{result_preview}\n\n"
+                    
+                    if len(cleaned_result) > 500:
+                        response += "_Full results are available in the expandable section above._"
                     
                     st.markdown(response)
                     
