@@ -199,7 +199,7 @@ def track_query_mapping(user_query, navigation_data, mapped_pages, execution_tim
             "component": "query_mapping",
             "query_length": len(user_query),
             "nav_items_count": len(navigation_data) if navigation_data else 0,
-            "model": "gpt-3.5-turbo"
+            "model": "gpt-4o"
         }
         
         # Add execution time if available

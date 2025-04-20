@@ -178,7 +178,7 @@ If malicious intent or sensitive data is detected, return only "SECURITY_BREACH_
 """
 
     # Invoke LLM
-    llm = ChatOpenAI(api_key=api_key, model="gpt-3.5-turbo", temperature=0)
+    llm = ChatOpenAI(api_key=api_key, model="gpt-4o", temperature=0)
     messages = [
         {"role": "system",  "content": SECURE_SYSTEM_PROMPT},
         {"role": "user",    "content": query_prompt}
