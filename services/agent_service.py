@@ -424,10 +424,6 @@ def _process_agent_history(
         urls = [u or "∅" for u in agent_history.urls()]
         markdown += "## Pages Visited\n" + _first_n(urls) + "\n\n"
 
-        # 3. Screenshots
-        screenshots = [s or "∅" for s in agent_history.screenshots()]
-        markdown += "## Screenshots Captured\n" + _first_n(screenshots) + "\n\n"
-
         # 4. Actions (+ interacted element)
         actions = agent_history.model_actions()  # list[dict]
         action_lines = [

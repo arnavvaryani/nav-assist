@@ -82,6 +82,8 @@ def display_query_mapping(user_query: str, site_data: Dict[str, Any], top_n: int
         st.write("**Identified Topics:**")
         st.write(", ".join(query_keywords))
     
+    relevant_pages: List[Dict[str, Any]] = []
+
     try:
         relevant_pages = _find_relevant_pages_with_ai(user_query, site_data)
         if relevant_pages:
