@@ -7,15 +7,15 @@ import urllib.parse
 
 # Import services
 from services.agent_service import run_agent_task
-from services.sitemap_service import generate_sitemap
-from services.prompts import generate_system_prompt, generate_website_analyzed_message
+from services.website_sitemap_extractor import generate_sitemap
+from services.prompt_service import generate_system_prompt, generate_website_analyzed_message
 
 # UI components
 from components.url_input import render_url_input
 from components.sitemap_display import display_sitemap
 
 # Secure query‑mapping (AI‑only)
-from components.query_mapping_display import (
+from components.security_breach_exception import (
     display_query_mapping,
     _find_relevant_pages_with_ai,
     SecurityBreachException

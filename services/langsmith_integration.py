@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 from langsmith import Client
 
 # Import our custom modules
-from langsmith_config import setup_langsmith, track_prompt, get_project_metrics
-from metrics_dashboard import render_metrics_dashboard
+from services.langsmith_config import setup_langsmith, track_prompt, get_project_metrics
+from metrics.metrics_dashboard import render_metrics_dashboard
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, 

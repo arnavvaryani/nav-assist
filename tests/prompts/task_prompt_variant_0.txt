@@ -1,7 +1,0 @@
-
-TASK: Find pricing information
-
-Navigate the website at https://example.com to find this information.
-1. Identify relevant pages
-2. Extract information
-3. Provide a clear answer

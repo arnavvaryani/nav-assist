@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 
 # Import configurations and utilities
-from config import initialize_session_state, set_page_config, load_api_key
+from services.config import initialize_session_state, set_page_config, load_api_key
 from components.sidebar import render_sidebar
 from components.chat_interface import render_chat_interface
 

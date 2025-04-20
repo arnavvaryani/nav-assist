@@ -7,6 +7,7 @@ readme = "README.md"
 packages = [
     {include = "components"},
     {include = "services"},
+    {include = "metrics"},
 ]
 
 [tool.poetry.dependencies]
@@ -17,9 +18,6 @@ streamlit = "^1.44.1"
 playwright = "^1.51.0"
 python-dotenv = "^1.1.0"
 matplotlib = "^3.10.1"
-promptfoo = "^0.1.0"
-
-
 
 [build-system]
 requires = ["poetry-core"]

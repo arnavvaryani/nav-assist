@@ -109,7 +109,7 @@ Please retry with a query focused on legitimate website information.
     except Exception as e:
         logger.error(f"Error using AI for page matching: {e}")
         st.warning("⚠️ AI-based matching unavailable. Using keyword matching instead.")
-        relevant_pages = _find_relevant_pages_with_keywords(user_query, query_keywords, site_data)
+      #  relevant_pages = _find_relevant_pages_with_keywords(user_query, query_keywords, site_data)
     
     # Display the matched pages in a table
     if relevant_pages:

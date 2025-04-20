@@ -1230,7 +1230,7 @@ def generate_sitemap(url: str, max_depth: int = 3) -> Dict[str, Any]:
         
         # Track sitemap generation with LangSmith if enabled
         try:
-            from langsmith_config import track_prompt
+            from services.langsmith_config import track_prompt
             
             # Check if LangSmith tracking is enabled
             if st.session_state.get('langsmith_enabled', False):

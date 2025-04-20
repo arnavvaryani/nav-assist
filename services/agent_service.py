@@ -10,13 +10,10 @@ from langchain_openai import ChatOpenAI
 from browser_use import Agent, BrowserConfig, Browser
 from browser_use.browser.context import BrowserContextConfig, BrowserContext
 
+from components.security_breach_exception import SecurityBreachException
+
 # Set up logging
 logger = logging.getLogger("agent_service")
-
-# Custom exception for security breaches
-class SecurityBreachException(Exception):
-    """Exception raised when a security breach is detected."""
-    pass
 
 async def run_agent_task(
     task: str, 

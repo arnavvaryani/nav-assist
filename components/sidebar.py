@@ -1,636 +1,402 @@
-import streamlit as st
-import time
-import datetime
-import logging
 import os
 import re
-from langsmith_config import get_project_metrics
-import pandas as pd
-import matplotlib.pyplot as plt
+import time
+import logging
 from datetime import datetime, timedelta
 
-logger = logging.getLogger("sidebar")
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
 
-def is_valid_openai_key(api_key):
-    """Validate if the API key has the correct format."""
+from services.langsmith_config import get_project_metrics
+
+# ——— Logger & Session‑State Helpers —————————————————————————————
+logger = logging.getLogger("nav_assist.sidebar")
+logger.setLevel(logging.INFO)
+
+def ss(key, default=None):
+    return st.session_state.get(key, default)
+
+def set_ss(key, value):
+    st.session_state[key] = value
+
+# ——— CACHED METRICS LOADER ——————————————————————————————————————
+@st.cache_data
+def load_metrics(project: str, days: int):
+    return get_project_metrics(project, days)
+
+# ——— VALIDATORS —————————————————————————————————————————————
+def is_valid_openai_key(api_key: str) -> tuple[bool, str]:
     if not api_key:
         return False, "API key is empty"
-    
-    # Remove any whitespace
     api_key = api_key.strip()
-    
-    # Basic validation - OpenAI keys usually start with 'sk-' and are longer than 30 chars
     if not api_key.startswith('sk-'):
         return False, "API key should start with 'sk-'"
-    
     if len(api_key) < 30:
         return False, "API key is too short"
-    
-    # Check for invalid characters
     if re.search(r'[^a-zA-Z0-9_\-]', api_key):
         return False, "API key contains invalid characters"
-        
     return True, "Valid API key format"
 
-def is_valid_langsmith_key(api_key):
-    """Validate if the LangSmith API key has the correct format."""
+def is_valid_langsmith_key(api_key: str) -> tuple[bool, str]:
     if not api_key:
         return False, "API key is empty"
-    
-    # Remove any whitespace
     api_key = api_key.strip()
-    
-    # Basic validation for LangSmith keys
-    if len(api_key) < 20:  # LangSmith keys are generally long
+    if len(api_key) < 20:
         return False, "API key is too short"
-    
-    # Check for invalid characters
     if re.search(r'[^a-zA-Z0-9_\-]', api_key):
         return False, "API key contains invalid characters"
-        
     return True, "Valid API key format"
 
+# ——— RESET HELPERS —————————————————————————————————————————————
+def reset_analysis_state():
+    set_ss('website_analyzed', False)
+    set_ss('website_url', None)
+    set_ss('site_data', None)
+
+def reset_conversation():
+    reset_analysis_state()
+    new_id = f"conversation_{time.strftime('%Y%m%d_%H%M%S')}"
+    set_ss('current_conversation_id', new_id)
+    st.session_state.conversations[new_id] = {
+        "title": "New Website Analysis",
+        "messages": [
+            {"role": "assistant", "content": "Hello! I'm your Nav Assist. Please enter a website URL to get started."}
+        ],
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    set_ss('messages', st.session_state.conversations[new_id]["messages"])
+    set_ss('agent_result', None)
+
+# ——— MAIN TAB ————————————————————————————————————————————————
+def render_main_tab():
+    st.subheader("API Key Status")
+    # OpenAI key
+    if ss('api_key_set', False) and ss('api_key'):
+        valid, msg = is_valid_openai_key(ss('api_key'))
+        if valid:
+            st.success("OpenAI API key loaded successfully")
+        else:
+            st.error(f"Stored OpenAI key invalid: {msg}")
+            set_ss('api_key_set', False)
+    if not ss('api_key_set', False):
+        st.error("Valid OpenAI API key not found")
+        st.info("Add a valid OpenAI API key below")
+        with st.form("openai_key_form"):
+            key = st.text_input(
+                "Enter OpenAI API Key",
+                type="password",
+                help="Your key should start with 'sk-'"
+            )
+            if st.form_submit_button("Save API Key"):
+                valid, msg = is_valid_openai_key(key)
+                if valid:
+                    clean = key.strip()
+                    set_ss('api_key', clean)
+                    set_ss('api_key_set', True)
+                    os.environ["OPENAI_API_KEY"] = clean
+                    st.success("OpenAI API key saved!")
+                    st.rerun()
+                else:
+                    st.error(f"Invalid API key: {msg}")
+
+    # LangSmith key
+    st.subheader("LangSmith Metrics")
+    if ss('langsmith_enabled', False):
+        st.success("LangSmith tracking enabled")
+    else:
+        st.warning("LangSmith tracking disabled")
+        with st.form("langsmith_key_form"):
+            key = st.text_input(
+                "Enter LangSmith API Key",
+                type="password",
+                help="Enable tracking of prompt metrics"
+            )
+            proj = st.text_input(
+                "Project Name",
+                value=ss('langsmith_project', 'nav-assist'),
+                help="LangSmith project name"
+            )
+            if st.form_submit_button("Enable LangSmith"):
+                valid, msg = is_valid_langsmith_key(key)
+                if valid:
+                    clean = key.strip()
+                    set_ss('langsmith_api_key', clean)
+                    set_ss('langsmith_enabled', True)
+                    set_ss('langsmith_project', proj)
+                    os.environ["LANGSMITH_API_KEY"] = clean
+                    os.environ["LANGSMITH_PROJECT"] = proj
+                    st.success("LangSmith tracking enabled!")
+                    st.rerun()
+                else:
+                    st.error(f"Invalid LangSmith API key: {msg}")
+
+    # Current website info
+    if ss('website_analyzed', False) and ss('site_data'):
+        st.subheader("Current Website")
+        st.write(f"**Analyzing:** {ss('site_data').get('title','this website')}")
+        st.write(f"**URL:** {ss('website_url')}")
+
+    # Conversation history
+    st.subheader("Analyses History")
+    if st.button("New Website Analysis", key="new_analysis"):
+        reset_conversation()
+        st.rerun()
+
+    options = []
+    for conv_id, data in reversed(list(st.session_state.conversations.items())):
+        title = data['title']
+        ts = data.get('timestamp')
+        if ts:
+            try:
+                dt = datetime.strptime(ts, '%Y-%m-%d %H:%M:%S')
+                title = f"{title} ({dt.strftime('%b %d')})"
+            except:
+                pass
+        options.append((conv_id, title))
+
+    if options:
+        ids, labels = zip(*options)
+        sel = st.selectbox(
+            "Previous analyses",
+            options=ids,
+            format_func=lambda x: dict(options)[x]
+        )
+        if sel != ss('current_conversation_id'):
+            set_ss('current_conversation_id', sel)
+            set_ss('messages', st.session_state.conversations[sel]["messages"].copy())
+            url = st.session_state.conversations[sel].get("url")
+            if url:
+                set_ss('website_url', url)
+                if not ss('site_data'):
+                    set_ss('site_data', {
+                        "url": url,
+                        "title": st.session_state.conversations[sel].get("title"),
+                        "internal_link_count": 0,
+                        "external_link_count": 0,
+                        "content_sections": []
+                    })
+                set_ss('website_analyzed', True)
+            else:
+                reset_analysis_state()
+            st.rerun()
+
+    new_title = st.text_input(
+        "Rename analysis",
+        value=st.session_state.conversations[ss('current_conversation_id')]["title"]
+    )
+    if new_title and new_title != st.session_state.conversations[ss('current_conversation_id')]["title"]:
+        st.session_state.conversations[ss('current_conversation_id')]["title"] = new_title
+
+# ——— SETTINGS TAB —————————————————————————————————————————————
+def render_settings_tab():
+    st.subheader("Browser Settings")
+    headless = st.checkbox("Headless Mode", value=ss('headless', True), help="Run in headless mode")
+    set_ss('headless', headless)
+
+    with st.expander("Advanced Options"):
+        col1, col2 = st.columns(2)
+        w = st.number_input("Width", 800, 3840, ss('browser_width', 1280), step=10)
+        h = st.number_input("Height", 600, 2160, ss('browser_height', 800), step=10)
+        set_ss('browser_width', w)
+        set_ss('browser_height', h)
+
+        wait = st.slider("Page Load Wait (s)", 1, 30, ss('wait_time', 10))
+        set_ss('wait_time', wait)
+
+        depth = st.slider("Max Crawl Depth", 1, 5, ss('max_depth', 3))
+        set_ss('max_depth', depth)
+
+        rpm = st.slider("Requests/Minute", 10, 120, ss('requests_per_minute', 30))
+        set_ss('requests_per_minute', rpm)
+
+        pages = st.slider("Max Pages", 10, 200, ss('max_pages', 50))
+        set_ss('max_pages', pages)
+
+        st.info("Higher values will increase crawl time.")
+
+    st.subheader("API Settings")
+    model = st.selectbox(
+        "OpenAI Model",
+        ["gpt-4o", "gpt-4", "gpt-3.5-turbo"],
+        index=["gpt-4o", "gpt-4", "gpt-3.5-turbo"].index(ss('model_name', "gpt-4o"))
+    )
+    set_ss('model_name', model)
+
+    if ss('langsmith_enabled', False):
+        st.subheader("LangSmith Settings")
+        proj = st.text_input(
+            "Project Name",
+            value=ss('langsmith_project', 'nav-assist'),
+            help="Group metrics under this project"
+        )
+        if proj != ss('langsmith_project'):
+            set_ss('langsmith_project', proj)
+            os.environ["LANGSMITH_PROJECT"] = proj
+            st.success(f"LangSmith project set to {proj}")
+
+        trace = st.checkbox("Detailed Tracing", ss('detailed_tracing', True))
+        set_ss('detailed_tracing', trace)
+
+    st.subheader("Debugging")
+    if st.button("Check OpenAI Connection"):
+        api = ss('api_key') or os.getenv("OPENAI_API_KEY")
+        if not api:
+            st.error("No API key found")
+        else:
+            os.environ["OPENAI_API_KEY"] = api
+            from langchain_openai import ChatOpenAI
+            try:
+                ChatOpenAI(model="gpt-3.5-turbo", temperature=0).invoke("Hello")
+                st.success("✅ OpenAI API connection successful!")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {e}")
+
+    if ss('langsmith_enabled', False) and st.button("Check LangSmith Connection"):
+        key = ss('langsmith_api_key') or os.getenv("LANGSMITH_API_KEY")
+        if not key:
+            st.error("No LangSmith API key found")
+        else:
+            os.environ["LANGSMITH_API_KEY"] = key
+            from langsmith import Client
+            try:
+                Client(api_key=key).list_projects()
+                st.success("✅ LangSmith connection successful!")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {e}")
+
+# ——— METRICS TAB ——————————————————————————————————————————————
+def render_metrics_tab():
+    st.subheader("Website Analysis Metrics")
+    if not ss('langsmith_enabled', False):
+        st.warning("Enable LangSmith in Settings to view metrics")
+        if st.button("Go to Settings"):
+            st.experimental_set_query_params(tab="Settings")
+            st.rerun()
+        return
+
+    days = st.slider("Time range (days)", 1, 30, ss('metrics_days', 7))
+    set_ss('metrics_days', days)
+    if st.button("Refresh Metrics"):
+        st.rerun()
+
+    with st.spinner("Loading metrics..."):
+        metrics = load_metrics(ss('langsmith_project', 'nav-assist'), days)
+
+    if 'error' in metrics:
+        st.error(f"Error retrieving metrics: {metrics['error']}")
+        return
+
+    # Top‑level metrics
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Runs", metrics.get('total_runs', 0))
+    col2.metric("Success Rate", f"{metrics.get('success_rate', 0):.1f}%")
+    col3.metric("Avg Latency", f"{metrics.get('avg_latency', 0):.2f}s")
+
+    # Usage over time
+    usage = metrics.get('daily_usage', [])
+    if usage:
+        df = pd.DataFrame(usage)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.bar(df['date'], df['runs'], label='Total Runs')
+        ax.bar(df['date'], df['success'], label='Successful Runs', alpha=0.7)
+        ax.set(xlabel='Date', ylabel='Number of Runs', title='Usage Over Time')
+        ax.legend()
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+    else:
+        st.info("No daily usage data available")
+
+    # Component performance
+    stats = metrics.get('component_stats', {})
+    if stats:
+        data = []
+        for comp, s in stats.items():
+            data.append({
+                "Component": comp.replace('_', ' ').title(),
+                "Runs": s.get('count', 0),
+                "Success Rate": f"{s.get('success_rate', 0):.1f}%",
+                "Avg Latency": f"{s.get('avg_latency', 0):.2f}s"
+            })
+        dfc = pd.DataFrame(data)
+        st.dataframe(dfc, use_container_width=True)
+
+        values = [row["Runs"] for row in data]
+        if sum(values) > 0:
+            fig2, ax2 = plt.subplots()
+            ax2.pie(values, labels=[row["Component"] for row in data], autopct='%1.1f%%')
+            ax2.set_title('Component Usage')
+            st.pyplot(fig2)
+    else:
+        st.info("No component data available")
+
+    # Query types
+    qtypes = metrics.get('queries_by_type', {})
+    if qtypes:
+        st.subheader("Query Types")
+        mapping = {
+            "information_finding": "Information Finding",
+            "explanation": "Explanations",
+            "how_to": "How-To Instructions",
+            "contact_info": "Contact Information",
+            "pricing": "Pricing Information"
+        }
+        qdata = [
+            {"Query Type": mapping.get(k, k.replace('_',' ').title()), "Count": v}
+            for k,v in qtypes.items()
+        ]
+        dfq = pd.DataFrame(qdata)
+        c1, c2 = st.columns([1,2])
+        c1.dataframe(dfq, use_container_width=True)
+        fig3, ax3 = plt.subplots()
+        ax3.barh(range(len(qdata)), [d["Count"] for d in qdata])
+        ax3.set(
+            yticks=range(len(qdata)),
+            yticklabels=[d["Query Type"] for d in qdata],
+            xlabel='Count',
+            title='Query Types'
+        )
+        plt.tight_layout()
+        c2.pyplot(fig3)
+
+    # Recent activities
+    recent = metrics.get('most_recent_runs', [])
+    if recent:
+        rows = []
+        for r in recent:
+            ts = r.get('timestamp')
+            tstr = ts.strftime('%Y-%m-%d %H:%M') if hasattr(ts, 'strftime') else "Unknown"
+            rows.append({
+                "Time": tstr,
+                "Type": r.get('type','Unknown'),
+                "Component": r.get('component','').replace('_',' ').title(),
+                "Status": "✅" if r.get('success') else "❌"
+            })
+        dfr = pd.DataFrame(rows)
+        st.dataframe(dfr, use_container_width=True)
+    else:
+        st.info("No recent activity data available")
+
+    # Error types
+    errs = metrics.get('error_types', {})
+    if errs:
+        with st.expander("Error Types"):
+            st.dataframe({"Error": list(errs.keys()), "Count": list(errs.values())})
+
+    st.markdown("[View Full Metrics Dashboard in LangSmith](https://smith.langchain.com)")
+
+# ——— SIDEBAR RENDERER —————————————————————————————————————————
 def render_sidebar():
-    """Render the sidebar with website analysis settings."""
     with st.sidebar:
         st.title("Nav Assist")
-        
-        # Create tabs for different sidebar sections
-        main_tab, settings_tab, metrics_tab = st.tabs(["Main", "Settings", "Metrics"])
-        
-        with main_tab:
-            # API Key status section with enhanced validation
-            st.subheader("API Key Status")
-            
-            # Check if API key is in session state and validate it
-            current_key_valid = False
-            if st.session_state.get('api_key_set', False) and st.session_state.get('api_key'):
-                is_valid, message = is_valid_openai_key(st.session_state.api_key)
-                if is_valid:
-                    st.success("API key loaded successfully")
-                    current_key_valid = True
-                else:
-                    st.error(f"Stored API key is invalid: {message}")
-                    st.session_state.api_key_set = False
-            
-            if not current_key_valid:
-                st.error("Valid API key not found")
-                st.info("Add a valid OpenAI API key below")
-                
-                # Expanded API key input with validation feedback
-                with st.form("api_key_form"):
-                    api_key = st.text_input("Enter OpenAI API Key", type="password", 
-                                        help="Your key should start with 'sk-'")
-                    submit_key = st.form_submit_button("Save API Key")
-                    
-                    if submit_key:
-                        if api_key:
-                            # Validate the key format
-                            is_valid, message = is_valid_openai_key(api_key)
-                            
-                            if is_valid:
-                                # Clean the key (remove whitespace)
-                                clean_api_key = api_key.strip()
-                                
-                                # Update session state
-                                st.session_state.api_key = clean_api_key
-                                st.session_state.api_key_set = True
-                                
-                                # Set environment variable for good measure
-                                os.environ["OPENAI_API_KEY"] = clean_api_key
-                                
-                                
-                                st.success("API key saved successfully!")
-                                st.rerun()
-                            else:
-                                st.error(f"Invalid API key: {message}")
-                        else:
-                            st.error("Please enter an API key")
-                
-                # Add a note about how to get an API key
-                st.info("You need an OpenAI API key to use this app. Get one at: https://platform.openai.com/api-keys")
-            
-            # LangSmith API Key Section
-            st.subheader("LangSmith Metrics")
-            
-            # Check if LangSmith key is set
-            langsmith_enabled = st.session_state.get('langsmith_enabled', False)
-            if langsmith_enabled:
-                st.success("LangSmith tracking enabled")
-            else:
-                st.warning("LangSmith tracking disabled")
-                
-                # LangSmith API key input
-                with st.form("langsmith_key_form"):
-                    langsmith_key = st.text_input("Enter LangSmith API Key", type="password", 
-                                            help="Enable tracking of prompt metrics")
-                    project_name = st.text_input("Project Name", 
-                                            value=st.session_state.get('langsmith_project', 'nav-assist'),
-                                            help="LangSmith project name for grouping metrics")
-                    submit_langsmith = st.form_submit_button("Enable LangSmith")
-                    
-                    if submit_langsmith:
-                        if langsmith_key:
-                            # Validate the key format
-                            is_valid, message = is_valid_langsmith_key(langsmith_key)
-                            
-                            if is_valid:
-                                # Clean the key (remove whitespace)
-                                clean_key = langsmith_key.strip()
-                                
-                                # Update session state
-                                st.session_state.langsmith_api_key = clean_key
-                                st.session_state.langsmith_enabled = True
-                                st.session_state.langsmith_project = project_name
-                                
-                                # Set environment variables
-                                os.environ["LANGSMITH_API_KEY"] = clean_key
-                                os.environ["LANGSMITH_PROJECT"] = project_name
-                                
-                                st.success("LangSmith tracking enabled!")
-                                st.rerun()
-                            else:
-                                st.error(f"Invalid LangSmith API key: {message}")
-                        else:
-                            st.error("Please enter a LangSmith API key")
-                
-                # Add a note about LangSmith
-                st.info("LangSmith helps track and optimize AI prompts. Get an API key at: https://smith.langchain.com/")
-            
-            # Only show website info if a website is being analyzed
-            if st.session_state.get('website_analyzed', False) and st.session_state.get('site_data'):
-                site_title = st.session_state.site_data.get('title', 'this website')
-                base_url = st.session_state.website_url
-                
-                # Website info
-                st.subheader("Current Website")
-                st.write(f"**Analyzing:** {site_title}")
-                st.write(f"**URL:** {base_url}")
-            
-            # Conversation management section
-            st.subheader("Analyses History")
-            
-            # New conversation button for easy chat start
-            if st.button("New Website Analysis", key="new_analysis"):
-                # Reset website analysis state
-                st.session_state.website_analyzed = False
-                st.session_state.website_url = None
-                st.session_state.site_data = None
-                
-                # Create new conversation
-                new_id = f"conversation_{time.strftime('%Y%m%d_%H%M%S')}"
-                st.session_state.current_conversation_id = new_id
-                st.session_state.conversations[new_id] = {
-                    "title": "New Website Analysis",
-                    "messages": [
-                        {"role": "assistant", "content": "Hello! I'm your Nav Assist. I can help you analyze any website and find information for you. Please enter a website URL to get started."}
-                    ],
-                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                }
-                st.session_state.messages = st.session_state.conversations[new_id]["messages"]
-                st.session_state.agent_result = None
-                st.rerun()
-            
-            # Previous analyses select box
-            conversation_options = []
-            for conv_id, data in reversed(list(st.session_state.conversations.items())):
-                title_display = data['title']
-                if "timestamp" in data and data["timestamp"]:
-                    try:
-                        date_obj = datetime.datetime.strptime(data["timestamp"], '%Y-%m-%d %H:%M:%S')
-                        date_display = date_obj.strftime('%b %d')
-                        title_display = f"{data['title']} ({date_display})"
-                    except Exception:
-                        pass
-                conversation_options.append((conv_id, title_display))
-            
-            if conversation_options:
-                selected_conversation = st.selectbox(
-                    "Previous analyses",
-                    options=[id for id, _ in conversation_options],
-                    format_func=lambda x: next((title for id, title in conversation_options if id == x), x),
-                    index=0
-                )
-                
-                if selected_conversation != st.session_state.current_conversation_id:
-                    # Load the selected conversation
-                    st.session_state.current_conversation_id = selected_conversation
-                    st.session_state.messages = st.session_state.conversations[selected_conversation]["messages"].copy()
-                    
-                    # Restore website URL and analyzed state if available
-                    if "url" in st.session_state.conversations[selected_conversation]:
-                        url = st.session_state.conversations[selected_conversation]["url"]
-                        st.session_state.website_url = url
-                        
-                        # Check if site_data needs to be regenerated
-                        if st.session_state.get('site_data') is None:
-                            # We need to regenerate the site data from the URL
-                            try:
-                                st.session_state.website_analyzed = True
-                                
-                                # Use a spinner to show that we're loading data
-                                with st.spinner(f"Restoring website data for {url}..."):
-                                    # Only generate minimal data to avoid a full recrawl
-                                    minimal_site_data = {
-                                        "url": url,
-                                        "title": st.session_state.conversations[selected_conversation].get("title", "Website"),
-                                        "internal_link_count": 0,
-                                        "external_link_count": 0,
-                                        "content_sections": []
-                                    }
-                                    st.session_state.site_data = minimal_site_data
-                            except Exception as e:
-                                logger.error(f"Error restoring site data: {str(e)}")
-                                st.error(f"Could not restore website data. Please analyze the website again.")
-                                st.session_state.website_analyzed = False
-                        else:
-                            st.session_state.website_analyzed = True
-                    else:
-                        # If this is an old conversation without URL info, reset analysis state
-                        st.session_state.website_analyzed = False
-                        st.session_state.website_url = None
-                        st.session_state.site_data = None
-                    
-                    st.rerun()
-                    
-                # Option to rename the current conversation
-                new_title = st.text_input(
-                    "Rename analysis",
-                    value=st.session_state.conversations[st.session_state.current_conversation_id]["title"]
-                )
-                if new_title != st.session_state.conversations[st.session_state.current_conversation_id]["title"]:
-                    st.session_state.conversations[st.session_state.current_conversation_id]["title"] = new_title
-        
-        # Settings tab
-        with settings_tab:
-            st.subheader("Browser Settings")
-            
-            # Headless mode option
-            headless = st.checkbox("Headless Mode", value=True, help="Run browser in headless mode (no visible window)")
-            if headless != st.session_state.get('headless', True):
-                st.session_state.headless = headless
-            
-            # Advanced options expandable section
-            with st.expander("Advanced Options"):
-                # Browser window size
-                st.subheader("Browser Window Size")
-                col1, col2 = st.columns(2)
-                with col1:
-                    width = st.number_input("Width", min_value=800, max_value=3840, value=1280, step=10)
-                with col2:
-                    height = st.number_input("Height", min_value=600, max_value=2160, value=800, step=10)
-                
-                # Set browser dimensions in session state
-                if width != st.session_state.get('browser_width', 1280) or height != st.session_state.get('browser_height', 800):
-                    st.session_state.browser_width = width
-                    st.session_state.browser_height = height
-                
-                # Wait time settings
-                st.subheader("Timing Settings")
-                wait_time = st.slider("Page Load Wait Time (seconds)", min_value=1, max_value=30, value=10)
-                if wait_time != st.session_state.get('wait_time', 10):
-                    st.session_state.wait_time = wait_time
-                    
-                # Sitemap settings
-                st.subheader("Sitemap Settings")
-                max_depth = st.slider("Maximum Crawl Depth", min_value=1, max_value=5, value=3, 
-                                     help="Controls how deep the crawler will go into the website structure. Higher values mean more comprehensive analysis but longer crawl times.")
-                if max_depth != st.session_state.get('max_depth', 3):
-                    st.session_state.max_depth = max_depth
-                
-                # Request rate limiting (new)
-                st.subheader("Rate Limiting")
-                requests_per_minute = st.slider("Requests Per Minute", min_value=10, max_value=120, value=30,
-                                              help="Limits how many requests are made per minute to avoid overloading websites. Higher values mean faster analysis but might trigger rate limiting.")
-                if requests_per_minute != st.session_state.get('requests_per_minute', 30):
-                    st.session_state.requests_per_minute = requests_per_minute
-                
-                # Max pages to crawl (new)
-                max_pages = st.slider("Maximum Pages", min_value=10, max_value=200, value=50,
-                                     help="Maximum number of pages to analyze. Higher values provide more comprehensive analysis but take longer.")
-                if max_pages != st.session_state.get('max_pages', 50):
-                    st.session_state.max_pages = max_pages
-                
-                st.info("⚠️ Setting higher depth values or maximum pages will increase crawl time significantly. For large websites, moderate values are recommended.")
-                
-                # API model settings (new)
-                st.subheader("API Settings")
-                model_name = st.selectbox(
-                    "OpenAI Model", 
-                    options=["gpt-4o", "gpt-4", "gpt-3.5-turbo"],
-                    index=0,
-                    help="Select which OpenAI model to use. GPT-4o is recommended but may cost more."
-                )
-                if model_name != st.session_state.get('model_name', "gpt-4o"):
-                    st.session_state.model_name = model_name
-                    logger.debug(f"Changed model to: {model_name}")
-                
-                # LangSmith settings
-                if st.session_state.get('langsmith_enabled', False):
-                    st.subheader("LangSmith Settings")
-                    project_name = st.text_input(
-                        "Project Name",
-                        value=st.session_state.get('langsmith_project', 'nav-assist'),
-                        help="Project name for grouping metrics in LangSmith"
-                    )
-                    if project_name != st.session_state.get('langsmith_project', 'nav-assist'):
-                        st.session_state.langsmith_project = project_name
-                        os.environ["LANGSMITH_PROJECT"] = project_name
-                        st.success(f"Updated LangSmith project to: {project_name}")
-                    
-                    # Toggle for detailed tracing
-                    detailed_tracing = st.checkbox(
-                        "Detailed Tracing",
-                        value=st.session_state.get('detailed_tracing', True),
-                        help="Enable more detailed trace collection in LangSmith"
-                    )
-                    if detailed_tracing != st.session_state.get('detailed_tracing', True):
-                        st.session_state.detailed_tracing = detailed_tracing
-                
-                # Debugging section
-                st.subheader("Debugging")
-                if st.button("Check OpenAI API Connection"):
-                    try:
-                        from langchain_openai import ChatOpenAI
-                        
-                        # Get current API key
-                        api_key = st.session_state.get('api_key')
-                        if not api_key:
-                            api_key = os.getenv("OPENAI_API_KEY")
-                        
-                        if not api_key:
-                            st.error("No API key found to test")
-                        else:
-                            # Test API connection
-                            with st.spinner("Testing API connection..."):
-                                try:
-                                    # First set the key in environment
-                                    os.environ["OPENAI_API_KEY"] = api_key
-                                    
-                                    # Initialize the model
-                                    llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-                                    
-                                    # Test with a simple query
-                                    _ = llm.invoke("Hello")
-                                    
-                                    st.success("✅ API connection successful!")
-                                except Exception as e:
-                                    st.error(f"❌ API connection failed: {str(e)}")
-                                    st.code(str(e))
-                    except Exception as e:
-                        st.error(f"Error testing API: {str(e)}")
-                
-                # Add LangSmith connection test
-                if st.session_state.get('langsmith_enabled', False):
-                    if st.button("Check LangSmith Connection"):
-                        try:
-                            from langsmith import Client
-                            
-                            # Get current LangSmith API key
-                            langsmith_key = st.session_state.get('langsmith_api_key')
-                            if not langsmith_key:
-                                langsmith_key = os.getenv("LANGSMITH_API_KEY")
-                            
-                            if not langsmith_key:
-                                st.error("No LangSmith API key found to test")
-                            else:
-                                # Test LangSmith connection
-                                with st.spinner("Testing LangSmith connection..."):
-                                    try:
-                                        # First set the key in environment
-                                        os.environ["LANGSMITH_API_KEY"] = langsmith_key
-                                        
-                                        # Initialize the client
-                                        client = Client(api_key=langsmith_key)
-                                        
-                                        # Test with a simple query to get projects list
-                                        _ = client.list_projects()
-                                        
-                                        st.success("✅ LangSmith connection successful!")
-                                    except Exception as e:
-                                        st.error(f"❌ LangSmith connection failed: {str(e)}")
-                                        st.code(str(e))
-                        except Exception as e:
-                            st.error(f"Error testing LangSmith: {str(e)}")
-            
-            # Help section
-            st.subheader("Help & Information")
-            with st.expander("About This App"):
-                st.markdown("""
-                ### Nav Assist
-                
-                This application uses AI to analyze websites and find information. The process works in two steps:
-                
-                1. First, enter a website URL to analyze. The app will generate a detailed sitemap and structure analysis.
-                2. Then, ask specific questions about the website content.
-                
-                **Enhanced Features:**
-                
-                - **Comprehensive Website Mapping**: Extracts navigation, content sections, forms, and social media links
-                - **Intelligent Content Analysis**: Identifies key topics and main content areas
-                - **Form Detection**: Recognizes different types of forms like contact, login, or search
-                - **Social Media Integration**: Detects social profiles linked from the website
-                - **Prompt Metrics Tracking**: Uses LangSmith to track and optimize AI prompts
-                
-                The app uses a headless browser controlled by AI to navigate the website on your behalf.
-                """)
-        
-        # Metrics tab - Enhanced with improved metrics
-        with metrics_tab:
-            st.subheader("Website Analysis Metrics")
-            
-            if not st.session_state.get('langsmith_enabled', False):
-                st.warning("LangSmith metrics tracking is not enabled. Enable it in the Settings tab to view metrics.")
-                
-                # Add a button to directly open settings tab
-                if st.button("Enable LangSmith Tracking"):
-                    # Set the settings tab as active
-                    st.experimental_set_query_params(tab="Settings")
-                    st.rerun()
-            else:
-                # Add time range selection
-                days_back = st.slider("Time range (days)", min_value=1, max_value=30, value=7)
-                
-                # Refresh button
-                if st.button("Refresh Metrics"):
-                    st.rerun()
-                
-                # Get metrics from LangSmith
-                with st.spinner("Loading metrics from LangSmith..."):
-                    try:
-                        metrics = get_project_metrics(
-                            st.session_state.get('langsmith_project', 'nav-assist'),
-                            days=days_back
-                        )
-                        
-                        if 'error' in metrics:
-                            st.error(f"Error retrieving metrics: {metrics['error']}")
-                        else:
-                            # Top-level metrics in columns
-                            st.subheader("Overall Statistics")
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("Total Runs", metrics.get('total_runs', 0))
-                            with col2:
-                                st.metric("Success Rate", f"{metrics.get('success_rate', 0):.1f}%")
-                            with col3:
-                                st.metric("Avg Latency", f"{metrics.get('avg_latency', 0):.2f}s")
-                                
-                            # Add a second row for website-specific metrics
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("Websites Analyzed", len(metrics.get('websites_analyzed', [])))
-                            with col2:
-                                component_count = len(metrics.get('component_stats', {}))
-                                st.metric("Components Used", component_count)
-                            
-                            # Add usage graph over time if data is available
-                            st.subheader("Usage Over Time")
-                            daily_usage = metrics.get('daily_usage', [])
-                            if daily_usage:
-                                # Create dataframe for charting
-                                df = pd.DataFrame(daily_usage)
-                                
-                                # Create a simple bar chart
-                                fig, ax = plt.subplots(figsize=(10, 4))
-                                ax.bar(df['date'], df['runs'], label='Total Runs')
-                                ax.bar(df['date'], df['success'], label='Successful Runs', alpha=0.7)
-                                ax.set_xlabel('Date')
-                                ax.set_ylabel('Number of Runs')
-                                ax.set_title('Usage Over Time')
-                                ax.legend()
-                                plt.xticks(rotation=45)
-                                plt.tight_layout()
-                                
-                                # Display the chart
-                                st.pyplot(fig)
-                            else:
-                                st.info("No daily usage data available yet")
-                            
-                            # Component performance
-                            st.subheader("Component Performance")
-                            component_stats = metrics.get('component_stats', {})
-                            if component_stats:
-                                # Format component stats for display
-                                component_data = []
-                                for component, stats in component_stats.items():
-                                    # Make component name more readable
-                                    component_name = component.replace('_', ' ').title()
-                                    component_data.append({
-                                        "Component": component_name,
-                                        "Runs": stats.get('count', 0),
-                                        "Success Rate": f"{stats.get('success_rate', 0):.1f}%",
-                                        "Avg Latency": f"{stats.get('avg_latency', 0):.2f}s"
-                                    })
-                                
-                                # Display as a dataframe
-                                component_df = pd.DataFrame(component_data)
-                                st.dataframe(component_df, use_container_width=True)
-                                
-                                # Display component usage as a pie chart
-                                fig, ax = plt.subplots()
-                                components = [d["Component"] for d in component_data]
-                                values = [d["Runs"] for d in component_data]
-                                
-                                # Only show if we have meaningful data
-                                if sum(values) > 0:
-                                    ax.pie(values, labels=components, autopct='%1.1f%%')
-                                    ax.set_title('Component Usage')
-                                    st.pyplot(fig)
-                            else:
-                                st.info("No component data available yet")
-                                
-                            # Query type analysis (if available)
-                            query_types = metrics.get('queries_by_type', {})
-                            if query_types:
-                                st.subheader("Query Types")
-                                
-                                # Format query types for display (make names more readable)
-                                readable_types = {
-                                    "information_finding": "Information Finding",
-                                    "explanation": "Explanations",
-                                    "how_to": "How-To Instructions",
-                                    "contact_info": "Contact Information",
-                                    "pricing": "Pricing Information",
-                                    "other": "Other Queries"
-                                }
-                                
-                                query_data = []
-                                for q_type, count in query_types.items():
-                                    display_name = readable_types.get(q_type, q_type.replace('_', ' ').title())
-                                    query_data.append({
-                                        "Query Type": display_name,
-                                        "Count": count
-                                    })
-                                
-                                # Display as a dataframe and chart
-                                query_df = pd.DataFrame(query_data)
-                                col1, col2 = st.columns([1, 2])
-                                
-                                with col1:
-                                    st.dataframe(query_df, use_container_width=True)
-                                    
-                                with col2:
-                                    # Display as a horizontal bar chart
-                                    fig, ax = plt.subplots()
-                                    y_pos = range(len(query_data))
-                                    counts = [d["Count"] for d in query_data]
-                                    labels = [d["Query Type"] for d in query_data]
-                                    
-                                    # Only display if we have data
-                                    if len(counts) > 0:
-                                        ax.barh(y_pos, counts)
-                                        ax.set_yticks(y_pos)
-                                        ax.set_yticklabels(labels)
-                                        ax.set_xlabel('Count')
-                                        ax.set_title('Query Types')
-                                        plt.tight_layout()
-                                        st.pyplot(fig)
-                            
-                            # Recent runs (show the last few activities)
-                            st.subheader("Recent Activities")
-                            recent_runs = metrics.get('most_recent_runs', [])
-                            if recent_runs:
-                                # Format runs for display
-                                recent_data = []
-                                for run in recent_runs:
-                                    # Format timestamp nicely
-                                    timestamp = run.get('timestamp')
-                                    if timestamp:
-                                        formatted_time = timestamp.strftime('%Y-%m-%d %H:%M')
-                                    else:
-                                        formatted_time = "Unknown"
-                                        
-                                    # Format component name nicely
-                                    component = run.get('component', 'unknown')
-                                    component_name = component.replace('_', ' ').title()
-                                    
-                                    # Add status icon
-                                    status = "✅" if run.get('success', False) else "❌"
-                                    
-                                    recent_data.append({
-                                        "Time": formatted_time,
-                                        "Type": run.get('type', 'Unknown'),
-                                        "Component": component_name,
-                                        "Status": status,
-                                    })
-                                
-                                # Display as a dataframe
-                                recent_df = pd.DataFrame(recent_data)
-                                st.dataframe(recent_df, use_container_width=True)
-                            else:
-                                st.info("No recent activity data available")
-                            
-                            # Error types if any
-                            error_types = metrics.get('error_types', {})
-                            if error_types and len(error_types) > 0:
-                                with st.expander("Error Types"):
-                                    error_data = {"Error": list(error_types.keys()), 
-                                                "Count": list(error_types.values())}
-                                    st.dataframe(error_data)
-                    
-                    except Exception as e:
-                        st.error(f"Error retrieving metrics: {str(e)}")
-                
-                # Add link to LangSmith dashboard
-                st.markdown("[View Full Metrics Dashboard in LangSmith](https://smith.langchain.com)")
+        tabs = st.tabs(["Main", "Settings", "Metrics"])
+        with tabs[0]:
+            render_main_tab()
+        with tabs[1]:
+            render_settings_tab()
+        with tabs[2]:
+            render_metrics_tab()
+
+if __name__ == "__main__":
+    render_sidebar()
